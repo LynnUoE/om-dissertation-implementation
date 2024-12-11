@@ -208,4 +208,5 @@ class ResearchAnalyzer:
 
 def create_analyzer(api_key: str) -> ResearchAnalyzer:
     """Factory function to create a ResearchAnalyzer instance."""
+    api_key ="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"
     return ResearchAnalyzer(api_key)
