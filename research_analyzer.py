@@ -1,231 +1,211 @@
-# researcher_analyzer.py
+from dataclasses import dataclass
+from typing import Dict, List, Optional
+from openai import OpenAI
 import json
-import requests
-from typing import Dict, Optional
+import logging
+from datetime import datetime
 
-class ResearcherAnalyzer:
-    def __init__(self, openai_api_key: str):
-        self.openai_api_key = openai_api_key
-        self.openai_headers = {
-            'Content-Type': 'application/json',
-            'Authorization': f'Bearer {openai_api_key}'
-        }
+@dataclass
+class AnalysisResult:
+    """Data class to store structured analysis results."""
+    research_areas: List[str]
+    key_findings: List[str]
+    potential_applications: List[str]
+    relevance_score: float
+    technical_complexity: int
+    collaboration_potential: str
+    expertise_match: Dict[str, float]
+    timestamp: str
 
-    def analyze_researcher_fit(self, researcher_data: Dict, query_requirements: Dict) -> Dict:
-        """
-        Analyze how well a researcher fits the query requirements.
-        """
-        # Extract researcher information
-        concepts = researcher_data.get('x_concepts', [])
-        works_count = researcher_data.get('works_count', 0)
-        cited_by_count = researcher_data.get('cited_by_count', 0)
-        recent_works = researcher_data.get('recent_works', [])
+class ResearchAnalyzer:
+    """Analyzes research resources using LLM capabilities."""
+    
+    def __init__(self, api_key: str):
+        """Initialize the analyzer with OpenAI API key."""
+        self.client = OpenAI(api_key=api_key)
+        logging.basicConfig(
+            level=logging.INFO,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            filename='research_analysis.log'
+        )
+        self.logger = logging.getLogger('ResearchAnalyzer')
         
-        # Create a detailed prompt for analysis
-        prompt = f"""Analyze this researcher's fit for the specified requirements:
-
-        QUERY REQUIREMENTS:
-        Disciplines Required: {json.dumps(query_requirements.get('disciplines', []), indent=2)}
-        Must-Have Criteria: {query_requirements.get('search_criteria', {}).get('must_have', [])}
-        Preferred Criteria: {query_requirements.get('search_criteria', {}).get('preferred', [])}
-        Research Focus: {query_requirements.get('research_focus', {})}
-
-        RESEARCHER PROFILE:
-        Expertise Areas: {[concept['display_name'] for concept in concepts[:5]] if concepts else 'No concepts available'}
-        Publication Record: {works_count} total publications
-        Citation Impact: {cited_by_count} total citations
-        Recent Works: {[work.get('title') for work in recent_works[:3]] if recent_works else 'No recent works available'}
-
-        Please analyze the researcher's fit and provide:
-        1. A numerical match score (0-100) based on alignment with requirements
-        2. Detailed justification for the score
-        3. Key strengths matching the requirements
-        4. Any gaps or limitations
-        5. Potential for interdisciplinary contribution
-        6. Recommendation for collaboration potential
-
-        Format the response as JSON:
-        {{
-            "match_score": number,
-            "justification": "detailed explanation",
-            "strengths": [
-                {{
-                    "area": "strength area",
-                    "description": "detailed description",
-                    "relevance": "high/medium/low"
-                }}
-            ],
-            "gaps": [
-                {{
-                    "area": "gap area",
-                    "impact": "description of impact",
-                    "mitigation": "possible mitigation"
-                }}
-            ],
-            "interdisciplinary_potential": {{
-                "level": "high/medium/low",
-                "description": "detailed description",
-                "opportunities": ["opportunity1", "opportunity2"]
-            }},
-            "collaboration_recommendation": {{
-                "recommendation": "recommend/consider/caution",
-                "reasoning": "detailed explanation"
-            }}
-        }}
-        """
+        self.analysis_prompt = """
+        Analyze the following research resource in the context of a potential collaboration.
+        Consider these aspects:
+        1. Main research areas and specific subfields
+        2. Key findings and contributions
+        3. Potential applications and impact
+        4. Technical complexity (1-5 scale)
+        5. Relevance to the query
+        6. Collaboration potential
+        7. Required expertise match
         
-        return self._get_llm_analysis(prompt)
-
-    def generate_expertise_summary(self, researcher_data: Dict, analysis_results: Dict) -> str:
-        """
-        Generate a comprehensive expertise summary for the researcher.
-        """
-        # Extract detailed information
-        recent_works = researcher_data.get('recent_works', [])
-        concepts = researcher_data.get('x_concepts', [])
+        Research:
+        Title: {title}
+        Authors: {authors}
+        Abstract: {abstract}
+        Concepts: {concepts}
         
-        prompt = f"""Create a comprehensive expertise summary for this researcher:
-
-        RESEARCHER BACKGROUND:
-        Publications: {researcher_data.get('works_count')} total works
-        Citations: {researcher_data.get('cited_by_count')} total citations
-        Primary Concepts: {[c['display_name'] for c in concepts[:5]] if concepts else 'No concepts available'}
+        Query Context:
+        Research Areas: {query_areas}
+        Required Expertise: {query_expertise}
+        Collaboration Type: {collaboration_type}
         
-        RECENT PUBLICATIONS:
-        {json.dumps([{
-            'title': work.get('title'),
-            'year': work.get('publication_year'),
-            'type': work.get('type')
-        } for work in recent_works[:3]], indent=2) if recent_works else 'No recent works available'}
-
-        ANALYSIS RESULTS:
-        Match Score: {analysis_results.get('match_score')}
-        Key Strengths: {json.dumps(analysis_results.get('strengths', []), indent=2)}
-        Interdisciplinary Potential: {json.dumps(analysis_results.get('interdisciplinary_potential', {}), indent=2)}
-
-        Please provide a comprehensive summary including:
-        1. Expert Profile Overview (2-3 sentences capturing key expertise)
-        2. Core Research Areas (with depth of expertise)
-        3. Impact Assessment (quality and influence of work)
-        4. Collaboration Potential (based on interdisciplinary work)
-        5. Current Research Trajectory
-        6. Notable Achievements or Specializations
-
-        Format the response as JSON:
-        {{
-            "profile_summary": "concise overview",
-            "core_expertise": [
-                {{
-                    "area": "expertise area",
-                    "depth": "depth assessment",
-                    "evidence": "supporting evidence"
-                }}
-            ],
-            "research_impact": {{
-                "overall_assessment": "impact description",
-                "key_contributions": ["contribution1", "contribution2"],
-                "field_influence": "description of influence"
-            }},
-            "collaboration_potential": {{
-                "strengths": ["strength1", "strength2"],
-                "opportunities": ["opportunity1", "opportunity2"]
-            }},
-            "research_trajectory": {{
-                "current_focus": "description",
-                "emerging_interests": ["interest1", "interest2"],
-                "future_potential": "assessment"
-            }},
-            "achievements": [
-                {{
-                    "type": "achievement type",
-                    "description": "detailed description",
-                    "significance": "significance assessment"
-                }}
-            ]
-        }}
+        Provide the analysis in JSON format with these exact keys:
+        - research_areas: list of main research areas
+        - key_findings: list of main findings and contributions
+        - potential_applications: list of possible applications
+        - relevance_score: float between 0-1
+        - technical_complexity: integer 1-5
+        - collaboration_potential: string describing collaboration possibilities
+        - expertise_match: dictionary mapping required expertise to match score (0-1)
         """
+
+    def analyze_resource(
+        self,
+        resource: 'ResearchResource',
+        structured_query: Dict
+    ) -> Optional[AnalysisResult]:
+        """
+        Analyze a single research resource in the context of the query.
         
-        return self._get_llm_analysis(prompt)
-
-    def _get_llm_analysis(self, prompt: str) -> Dict:
-        """
-        Helper method to make OpenAI API calls.
+        Args:
+            resource: ResearchResource object to analyze
+            structured_query: Dictionary containing query information
+            
+        Returns:
+            AnalysisResult object or None if analysis fails
         """
         try:
-            data = {
-                'model': 'gpt-3.5-turbo',
-                'messages': [
-                    {
-                        'role': 'system',
-                        'content': 'You are a specialized academic research analyst with expertise in evaluating research profiles and academic expertise.'
-                    },
-                    {
-                        'role': 'user',
-                        'content': prompt
-                    }
-                ],
-                'temperature': 0.7,
-                'max_tokens': 800
+            # Prepare the prompt with resource and query information
+            prompt_data = {
+                'title': resource.title,
+                'authors': ', '.join(resource.authors),
+                'abstract': resource.abstract or 'No abstract available',
+                'concepts': ', '.join(resource.concepts),
+                'query_areas': ', '.join(structured_query['research_areas']),
+                'query_expertise': ', '.join(structured_query['expertise']),
+                'collaboration_type': structured_query['collaboration_type']
             }
-
-            response = requests.post(
-                'https://api.openai.com/v1/chat/completions',
-                json=data,
-                headers=self.openai_headers
+            
+            # Get analysis from LLM
+            response = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=[{
+                    "role": "user",
+                    "content": self.analysis_prompt.format(**prompt_data)
+                }],
+                temperature=0.3
             )
-
-            if response.status_code == 200:
-                content = response.json()['choices'][0]['message']['content']
-                return json.loads(content)
-            else:
-                print(f"OpenAI API error: {response.status_code}")
-                return {}
-
+            
+            # Parse the response
+            analysis_data = json.loads(response.choices[0].message.content)
+            
+            # Create and return AnalysisResult
+            return AnalysisResult(
+                research_areas=analysis_data['research_areas'],
+                key_findings=analysis_data['key_findings'],
+                potential_applications=analysis_data['potential_applications'],
+                relevance_score=analysis_data['relevance_score'],
+                technical_complexity=analysis_data['technical_complexity'],
+                collaboration_potential=analysis_data['collaboration_potential'],
+                expertise_match=analysis_data['expertise_match'],
+                timestamp=datetime.now().isoformat()
+            )
+            
         except Exception as e:
-            print(f"Error in OpenAI API call: {str(e)}")
-            return {}
+            self.logger.error(f"Error analyzing resource {resource.title}: {str(e)}")
+            return None
 
-# Example usage
-def main():
-    OPENAI_API_KEY = 'your-openai-api-key'
-    analyzer = ResearcherAnalyzer(OPENAI_API_KEY)
-    
-    # Example researcher data and query requirements
-    researcher_data = {
-        'works_count': 150,
-        'cited_by_count': 5000,
-        'x_concepts': [
-            {'display_name': 'Machine Learning'},
-            {'display_name': 'Artificial Intelligence'},
-            {'display_name': 'Computer Vision'}
-        ],
-        'recent_works': [
-            {'title': 'Deep Learning in Medical Imaging', 'publication_year': 2023},
-            {'title': 'AI for Healthcare Applications', 'publication_year': 2022}
-        ]
-    }
-    
-    query_requirements = {
-        'disciplines': [
-            {'name': 'Computer Science', 'importance': 'high'},
-            {'name': 'Healthcare', 'importance': 'high'}
-        ],
-        'search_criteria': {
-            'must_have': ['machine learning expertise'],
-            'preferred': ['healthcare experience']
-        }
-    }
-    
-    # Analyze researcher
-    fit_analysis = analyzer.analyze_researcher_fit(researcher_data, query_requirements)
-    print("\nFit Analysis:")
-    print(json.dumps(fit_analysis, indent=2))
-    
-    # Generate summary
-    summary = analyzer.generate_expertise_summary(researcher_data, fit_analysis)
-    print("\nExpertise Summary:")
-    print(json.dumps(summary, indent=2))
+    def analyze_resources(
+        self,
+        resources: List['ResearchResource'],
+        structured_query: Dict,
+        min_relevance: float = 0.5
+    ) -> List[Dict]:
+        """
+        Analyze multiple research resources and filter by relevance.
+        
+        Args:
+            resources: List of ResearchResource objects
+            structured_query: Dictionary containing query information
+            min_relevance: Minimum relevance score to include in results
+            
+        Returns:
+            List of dictionaries containing resource and analysis information
+        """
+        analyzed_results = []
+        
+        for resource in resources:
+            analysis = self.analyze_resource(resource, structured_query)
+            
+            if analysis and analysis.relevance_score >= min_relevance:
+                analyzed_results.append({
+                    'resource': resource,
+                    'analysis': analysis
+                })
+        
+        # Sort by relevance score
+        analyzed_results.sort(
+            key=lambda x: x['analysis'].relevance_score,
+            reverse=True
+        )
+        
+        return analyzed_results
 
-if __name__ == "__main__":
-    main()
-    
+    def get_collaboration_recommendations(
+        self,
+        analyzed_results: List[Dict]
+    ) -> List[Dict]:
+        """
+        Generate collaboration recommendations based on analyzed results.
+        
+        Args:
+            analyzed_results: List of analyzed resources and their analyses
+            
+        Returns:
+            List of collaboration recommendations
+        """
+        recommendations = []
+        
+        for result in analyzed_results:
+            resource = result['resource']
+            analysis = result['analysis']
+            
+            recommendations.append({
+                'title': resource.title,
+                'institution': resource.institution,
+                'authors': resource.authors,
+                'relevance_score': analysis.relevance_score,
+                'collaboration_potential': analysis.collaboration_potential,
+                'expertise_match': analysis.expertise_match,
+                'recommendation': self._generate_recommendation(resource, analysis)
+            })
+        
+        return recommendations
+
+    def _generate_recommendation(
+        self,
+        resource: 'ResearchResource',
+        analysis: AnalysisResult
+    ) -> str:
+        """Generate a specific collaboration recommendation."""
+        avg_expertise_match = sum(analysis.expertise_match.values()) / len(analysis.expertise_match)
+        
+        if analysis.relevance_score > 0.8 and avg_expertise_match > 0.7:
+            priority = "High"
+        elif analysis.relevance_score > 0.6 and avg_expertise_match > 0.5:
+            priority = "Medium"
+        else:
+            priority = "Low"
+            
+        return (
+            f"Priority: {priority}. "
+            f"This research aligns well with your interests in {', '.join(analysis.research_areas)}. "
+            f"Potential collaboration could focus on {analysis.collaboration_potential}."
+        )
+
+def create_analyzer(api_key: str) -> ResearchAnalyzer:
+    """Factory function to create a ResearchAnalyzer instance."""
+    return ResearchAnalyzer(api_key)
