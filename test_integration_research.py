@@ -1,120 +1,74 @@
-# resource_retriever.py
-import requests
-from typing import List, Dict, Optional
-from datetime import datetime
+import unittest
+from query_processor import QueryProcessor
+from openalex_searcher import OpenAlexSearcher, create_searcher
+import logging
+import json
 
-class ResourceRetriever:
-    def __init__(self, email: str):
-        self.email = email
-        self.openalex_base_url = "https://api.openalex.org"
-        self.headers = {'Accept': 'application/json'}
-    
-    def search_researchers(self, query_analysis: Dict, limit: int = 5) -> List[Dict]:
-        disciplines = [d['name'] for d in query_analysis.get('disciplines', [])]
-        expertise = query_analysis.get('search_criteria', {}).get('must_have', [])
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class TestQueryProcessorOpenAlexIntegration(unittest.TestCase):
+    def setUp(self):
+        # Update with your API key
+        self.api_key = "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"
+        self.processor = QueryProcessor(api_key=self.api_key)
+        self.searcher = create_searcher('s2231967@ed.ac.uk')
         
-        search_query = ' '.join(disciplines + expertise)
-        params = {
-            'filter': f'display_name.search:"{search_query}"',
-            'per_page': limit,
-            'mailto': self.email,
-            'sort': 'cited_by_count:desc'
-        }
-        
-        try:
-            response = requests.get(
-                f"{self.openalex_base_url}/authors",
-                params=params,
-                headers=self.headers
-            )
-            
-            if response.status_code == 200:
-                return response.json().get('results', [])
-            return []
-        except Exception as e:
-            print(f"Search error: {e}")
-            return []
-
-    def get_researcher_details(self, researcher_id: str) -> Dict:
-        try:
-            if 'openalex.org' in researcher_id:
-                researcher_id = researcher_id.split('/')[-1]
-            
-            params = {'mailto': self.email}
-            response = requests.get(
-                f"{self.openalex_base_url}/authors/{researcher_id}",
-                params=params,
-                headers=self.headers
-            )
-            
-            if response.status_code == 200:
-                researcher = response.json()
-                return self._enrich_researcher_data(researcher)
-            return {}
-        except Exception as e:
-            print(f"Error fetching researcher details: {e}")
-            return {}
-
-    def _enrich_researcher_data(self, researcher: Dict) -> Dict:
-        try:
-            # Get recent works
-            works_params = {
-                'filter': f'author.id:{researcher["id"]}',
-                'per_page': 5,
-                'sort': 'publication_date:desc',
-                'mailto': self.email
+        self.test_queries = [
+            {
+                "query": "Looking for experts in computer vision and deep learning for medical image analysis",
+                "expected_expertise": ["computer vision", "deep learning", "medical image"]
             }
-            
-            works_response = requests.get(
-                f"{self.openalex_base_url}/works",
-                params=works_params,
-                headers=self.headers
-            )
-            
-            if works_response.status_code == 200:
-                researcher['recent_works'] = works_response.json().get('results', [])
-            
-            return researcher
-        except Exception as e:
-            print(f"Error enriching researcher data: {e}")
-            return researcher
+        ]
 
-    def filter_researchers(self, researchers: List[Dict], query_analysis: Dict) -> List[Dict]:
-        required_expertise = set(query_analysis.get('search_criteria', {}).get('must_have', []))
-        filtered_results = []
+    def test_end_to_end_search(self):
+        """Test the complete flow from query processing to expert search"""
+        for test_case in self.test_queries:
+            query = test_case["query"]
+            expected_expertise = test_case["expected_expertise"]
+            
+            # Process query
+            structured_query = self.processor.process_query(query)
+            self.assertIsNotNone(structured_query)
+            logger.info(f"Processed query: {json.dumps(structured_query, indent=2)}")
+            
+            # Verify expertise matches
+            query_expertise = {exp.lower() for exp in structured_query.get('expertise', [])}
+            query_areas = {area.lower() for area in structured_query.get('research_areas', [])}
+            combined_expertise = query_expertise.union(query_areas)
+            
+            for expertise in expected_expertise:
+                self.assertTrue(
+                    any(expertise.lower() in exp for exp in combined_expertise),
+                    f"Expected expertise '{expertise}' not found in processed query"
+                )
+            
+            # Search for experts
+            experts = self.searcher.search_experts(structured_query, max_results=3)
+            self.assertIsNotNone(experts)
+            logger.info(f"Found {len(experts)} experts")
+            
+            if experts:
+                expert = experts[0]
+                logger.info(f"Top expert: {expert['name']}")
+                logger.info(f"Institution: {expert['institutions']}")
+                logger.info(f"Citations: {expert['citations']}")
+                
+                # Verify expert data structure
+                required_fields = ['name', 'institutions', 'works', 'citations', 'concepts']
+                for field in required_fields:
+                    self.assertIn(field, expert)
+
+    def test_error_handling(self):
+        """Test error cases"""
+        # Test with invalid structured query
+        invalid_query = {'invalid': 'query'}
+        experts = self.searcher.search_experts(invalid_query)
+        self.assertEqual(len(experts), 0)
         
-        for researcher in researchers:
-            concepts = [c['display_name'].lower() for c in researcher.get('x_concepts', [])]
-            expertise_match = any(req.lower() in ' '.join(concepts) for req in required_expertise)
-            
-            if expertise_match:
-                filtered_results.append(researcher)
-        
-        return filtered_results
+        # Test with empty query
+        experts = self.searcher.search_experts({})
+        self.assertEqual(len(experts), 0)
 
-# Example usage
-def main():
-    EMAIL = "your-email@example.com"
-    retriever = ResourceRetriever(EMAIL)
-    
-    # Example query analysis
-    query_analysis = {
-        "disciplines": [
-            {"name": "Computer Science", "importance": "high"}
-        ],
-        "search_criteria": {
-            "must_have": ["machine learning", "artificial intelligence"]
-        }
-    }
-    
-    researchers = retriever.search_researchers(query_analysis)
-    filtered_researchers = retriever.filter_researchers(researchers, query_analysis)
-    
-    for researcher in filtered_researchers:
-        details = retriever.get_researcher_details(researcher['id'])
-        print(f"Name: {details.get('display_name')}")
-        print(f"Citations: {details.get('cited_by_count')}")
-        print("-" * 50)
-
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    unittest.main(verbosity=2)

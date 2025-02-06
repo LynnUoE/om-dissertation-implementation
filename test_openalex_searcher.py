@@ -1,167 +1,163 @@
 import unittest
-from unittest.mock import Mock, patch
+from query_processor import QueryProcessor
+from openalex_searcher import OpenAlexSearcher, create_searcher, ResearchResource
+import logging
+import json
 from datetime import datetime
-import requests
 
-from openalex_searcher import OpenAlexSearcher, ResearchResource, create_searcher
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
-class TestOpenAlexSearcher(unittest.TestCase):
+class TestQueryProcessorOpenAlexIntegration(unittest.TestCase):
     def setUp(self):
-        """Set up test fixtures before each test method."""
+        """Initialize test environment with necessary components"""
+        self.api_key = "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"
+        self.processor = QueryProcessor(api_key=self.api_key)
         self.searcher = create_searcher('s2231967@ed.ac.uk')
         
-        # Sample test data
-        self.sample_structured_query = {
-            'research_areas': ['machine learning', 'artificial intelligence'],
-            'expertise': ['deep learning', 'neural networks'],
-            'search_keywords': ['computer vision'],
-            'collaboration_type': 'research project',
-            'requirements': ['python programming']
-        }
-        
-        self.sample_openalex_response = {
-            'results': [{
-                'title': 'Deep Learning Advances in Computer Vision',
-                'authorships': [
-                    {
-                        'author': {'display_name': 'John Doe'},
-                        'institutions': [{'display_name': 'Stanford University'}]
-                    },
-                    {
-                        'author': {'display_name': 'Jane Smith'},
-                        'institutions': []
-                    }
-                ],
-                'publication_date': '2023-01-15',
-                'doi': '10.1234/example.doi',
-                'cited_by_count': 150,
-                'concepts': [
-                    {'display_name': 'Machine Learning'},
-                    {'display_name': 'Computer Vision'}
-                ],
-                'type': 'journal-article',
-                'abstract': 'A study on deep learning applications in computer vision.'
-            }],
-            'meta': {
-                'count': 1,
-                'page': 1,
-                'per_page': 50
+        # Enhanced test cases with more comprehensive coverage
+        self.test_queries = [
+            {
+                "query": "Looking for experts in computer vision and deep learning for medical image analysis",
+                "expected_expertise": ["computer vision", "deep learning", "medical image"],
+                "min_citations": 1000
+            },
+            {
+                "query": "Seeking collaboration in quantum computing and machine learning",
+                "expected_expertise": ["quantum computing", "machine learning"],
+                "min_citations": 500
             }
-        }
-
-    def test_initialization(self):
-        """Test proper initialization of OpenAlexSearcher."""
-        self.assertEqual(
-            self.searcher.headers['User-Agent'],
-            'ResearchMatcher (s2231967@ed.ac.uk)'
-        )
-        self.assertIsInstance(self.searcher.session, requests.Session)
-
-    def test_construct_query(self):
-        """Test query string construction from structured query."""
-        query_string = self.searcher._construct_query(self.sample_structured_query)
-        
-        # Verify all search terms are included
-        search_terms = [
-            'machine learning',
-            'artificial intelligence',
-            'computer vision',
-            'deep learning',
-            'neural networks'
         ]
-        for term in search_terms:
-            self.assertIn(f'"{term}"', query_string)
+
+    def test_end_to_end_search(self):
+        """Test the complete workflow from query processing to expert search"""
+        logger.info("\nStarting end-to-end integration test")
         
-        # Verify year range is included
-        current_year = datetime.now().year
-        self.assertIn(
-            f'publication_year:{current_year-5}-{current_year}',
-            query_string
-        )
-
-    @patch('requests.Session.get')
-    def test_search_success(self, mock_get):
-        """Test successful API search with mock response."""
-        # Setup mock response
-        mock_response = Mock()
-        mock_response.json.return_value = self.sample_openalex_response
-        mock_response.raise_for_status.return_value = None
-        mock_get.return_value = mock_response
-
-        # Perform search
-        results = self.searcher.search(self.sample_structured_query, max_results=1)
-        
-        # Verify results
-        self.assertEqual(len(results), 1)
-        result = results[0]
-        self.assertIsInstance(result, ResearchResource)
-        self.assertEqual(result.title, 'Deep Learning Advances in Computer Vision')
-        self.assertEqual(result.authors, ['John Doe', 'Jane Smith'])
-        self.assertEqual(result.institution, 'Stanford University')
-        self.assertEqual(result.citations_count, 150)
-
-    @patch('requests.Session.get')
-    def test_search_error_handling(self, mock_get):
-        """Test error handling during API search."""
-        mock_get.side_effect = requests.exceptions.RequestException('API Error')
-        
-        results = self.searcher.search(self.sample_structured_query)
-        self.assertEqual(results, [])
-
-    def test_filter_results(self):
-        """Test filtering of search results."""
-        test_resources = [
-            ResearchResource(
-                title='Paper 1',
-                authors=['Author 1'],
-                publication_date='2023-01-01',
-                doi='10.1234/1',
-                citations_count=100,
-                concepts=['Machine Learning', 'AI'],
-                institution='University 1',
-                publication_type='journal-article',
-                abstract='Abstract 1'
-            ),
-            ResearchResource(
-                title='Paper 2',
-                authors=['Author 2'],
-                publication_date='2023-01-02',
-                doi='10.1234/2',
-                citations_count=5,
-                concepts=['Computer Vision'],
-                institution='University 2',
-                publication_type='journal-article',
-                abstract='Abstract 2'
+        for test_case in self.test_queries:
+            query = test_case["query"]
+            expected_expertise = test_case["expected_expertise"]
+            min_citations = test_case.get("min_citations")
+            
+            logger.info(f"\nTesting query: {query}")
+            
+            # Process query using QueryProcessor
+            structured_query = self.processor.process_query(query)
+            self.assertIsNotNone(structured_query)
+            logger.info(f"\nProcessed query structure:\n{json.dumps(structured_query, indent=2)}")
+            
+            # Verify query processing results
+            self._verify_query_processing(structured_query, expected_expertise)
+            
+            # Search for experts using enhanced searcher
+            experts = self.searcher.search_experts(
+                structured_query=structured_query,
+                max_results=3,
+                min_citations=min_citations
             )
-        ]
+            self.assertIsNotNone(experts)
+            
+            # Analyze and verify expert results
+            self._analyze_expert_results(experts)
 
-        # Test citation filter
-        filtered = self.searcher.filter_results(test_resources, min_citations=50)
-        self.assertEqual(len(filtered), 1)
-        self.assertEqual(filtered[0].title, 'Paper 1')
-
-        # Test concept filter
-        filtered = self.searcher.filter_results(
-            test_resources,
-            required_concepts=['Machine Learning']
-        )
-        self.assertEqual(len(filtered), 1)
-        self.assertEqual(filtered[0].title, 'Paper 1')
-
-    def test_parse_response(self):
-        """Test parsing of API response into ResearchResource object."""
-        result = self.searcher._parse_response(
-            self.sample_openalex_response['results'][0]
-        )
+    def _verify_query_processing(self, structured_query, expected_expertise):
+        """Verify the query processing results"""
+        query_expertise = {exp.lower() for exp in structured_query.get('expertise', [])}
+        query_areas = {area.lower() for area in structured_query.get('research_areas', [])}
+        combined_expertise = query_expertise.union(query_areas)
         
-        self.assertIsInstance(result, ResearchResource)
-        self.assertEqual(result.title, 'Deep Learning Advances in Computer Vision')
-        self.assertEqual(len(result.authors), 2)
-        self.assertEqual(result.doi, '10.1234/example.doi')
-        self.assertEqual(result.citations_count, 150)
-        self.assertEqual(len(result.concepts), 2)
-        self.assertEqual(result.institution, 'Stanford University')
-        self.assertEqual(result.publication_type, 'journal-article')
+        for expertise in expected_expertise:
+            self.assertTrue(
+                any(expertise.lower() in exp.lower() for exp in combined_expertise),
+                f"Expected expertise '{expertise}' not found in processed query"
+            )
+        
+        # Verify query structure
+        required_fields = ['research_areas', 'expertise', 'search_keywords']
+        for field in required_fields:
+            self.assertIn(field, structured_query)
+
+    def _analyze_expert_results(self, experts):
+        """Analyze and verify expert search results"""
+        logger.info(f"\nFound {len(experts)} experts")
+        
+        if not experts:
+            logger.warning("No experts found for the query")
+            return
+            
+        for idx, expert in enumerate(experts, 1):
+            logger.info(f"\nExpert {idx}:")
+            logger.info(f"Name: {expert['name']}")
+            logger.info(f"Institutions: {', '.join(expert['institutions'])}")
+            logger.info(f"Total Citations: {expert['citations']}")
+            
+            # Log top works
+            if expert.get('works'):
+                logger.info("\nTop works:")
+                for work in expert['works'][:3]:
+                    logger.info(
+                        f"- {work.get('title')} "
+                        f"(Citations: {work.get('citations')})"
+                    )
+            
+            # Verify expert data structure
+            self._verify_expert_structure(expert)
+
+    def _verify_expert_structure(self, expert):
+        """Verify the structure of expert data"""
+        required_fields = ['name', 'institutions', 'works', 'citations', 'concepts']
+        for field in required_fields:
+            self.assertIn(field, expert)
+            
+        self.assertIsInstance(expert['citations'], int)
+        self.assertIsInstance(expert['works'], list)
+        self.assertIsInstance(expert['concepts'], list)
+
+    def test_error_handling(self):
+        """Test error handling scenarios"""
+        logger.info("\nTesting error handling scenarios")
+        
+        test_cases = [
+            ("Invalid query format", {'invalid': 'query'}),
+            ("None query", None),
+            ("Empty dictionary", {}),
+            ("Malformed dictionary", {'research_areas': None}),
+            ("Missing required fields", {'expertise': []})
+        ]
+        
+        for case_name, invalid_query in test_cases:
+            logger.info(f"\nTesting {case_name}")
+            experts = self.searcher.search_experts(invalid_query)
+            self.assertEqual(
+                len(experts), 0,
+                f"Expected empty result for {case_name}"
+            )
+
+    def test_expert_details(self):
+        """Test retrieval of detailed expert information"""
+        logger.info("\nTesting expert details retrieval")
+        
+        # First get some experts
+        structured_query = self.processor.process_query(self.test_queries[0]['query'])
+        experts = self.searcher.search_experts(structured_query, max_results=1)
+        
+        if experts:
+            expert_id = experts[0]['id']
+            logger.info(f"Retrieving details for expert ID: {expert_id}")
+            
+            details = self.searcher.get_expert_details(expert_id)
+            self.assertIsNotNone(details)
+            
+            # Log expert details
+            logger.info(f"\nExpert Details:")
+            logger.info(f"Name: {details.get('display_name')}")
+            logger.info(f"Citation Count: {details.get('cited_by_count')}")
+            
+            # Verify essential fields
+            self.assertIn('display_name', details)
+            self.assertIn('cited_by_count', details)
 
 if __name__ == '__main__':
-    unittest.main()
+    unittest.main(verbosity=2)

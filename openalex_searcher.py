@@ -1,163 +1,267 @@
 from typing import Dict, List, Optional
 import requests
 import time
-from dataclasses import dataclass
 from datetime import datetime
+from dataclasses import dataclass
+import logging
+from urllib.parse import quote
+import html
 
 @dataclass
-class ResearchResource:
-    """Data class to store structured research resource information."""
-    title: str
-    authors: List[str]
-    publication_date: str
-    doi: Optional[str]
+class ExpertResult:
+    """Structured container for expert data"""
+    id: str
+    name: str
+    institutions: List[str]
+    works_count: int
     citations_count: int
-    concepts: List[str]
-    institution: Optional[str]
-    publication_type: str
-    abstract: Optional[str]
+    concepts: List[Dict[str, str]]
+    last_known_institution: Optional[str] = None
+    counts_by_year: Optional[List[Dict]] = None
+    
+    @classmethod
+    def from_api_response(cls, data: Dict) -> 'ExpertResult':
+        """Create ExpertResult from API response data"""
+        institutions = []
+        last_known_institution = None
+        
+        if data.get('last_known_institution'):
+            last_known_institution = data['last_known_institution'].get('display_name')
+            if last_known_institution:
+                institutions.append(last_known_institution)
+        
+        return cls(
+            id=data.get('id', ''),
+            name=html.unescape(data.get('display_name', '')),
+            institutions=institutions,
+            works_count=data.get('works_count', 0),
+            citations_count=data.get('cited_by_count', 0),
+            concepts=data.get('x_concepts', []),
+            last_known_institution=last_known_institution,
+            counts_by_year=data.get('counts_by_year', [])
+        )
+
+@dataclass
+class SearchResponse:
+    """Data class to store structured search responses"""
+    status_code: int
+    experts: List[ExpertResult]
+    error: Optional[str] = None
+    meta: Optional[Dict] = None
 
 class OpenAlexSearcher:
-    """Class to search for research resources using the OpenAlex API."""
+    """Enhanced searcher for finding research experts through OpenAlex API"""
     
-    BASE_URL = "https://api.openalex.org"
-    
-    def __init__(self, email: str):
-        """Initialize the searcher with user's email for API politeness."""
-        self.headers = {'User-Agent': f'ResearchMatcher ({email})'}
+    def __init__(self, email: str, max_retries: int = 3, rate_limit_delay: float = 1.0):
+        """Initialize the searcher with configuration parameters"""
+        self.base_url = "https://api.openalex.org"
+        self.email = email
+        self.max_retries = max_retries
+        self.rate_limit_delay = rate_limit_delay
+        
         self.session = requests.Session()
-        self.session.headers.update(self.headers)
-    
-    def _construct_query(self, structured_query: Dict) -> str:
-        """Construct OpenAlex query string from structured query."""
-        query_parts = []
+        self.session.headers.update({
+            'User-Agent': f'ResearchCollaborationTool ({email})',
+            'Accept': 'application/json'
+        })
         
-        # Add research areas and keywords to search
-        search_terms = (
-            structured_query['research_areas'] +
-            structured_query['search_keywords'] +
-            structured_query['expertise']
-        )
-        if search_terms:
-            terms_query = ' OR '.join(f'"{term}"' for term in search_terms)
-            query_parts.append(f'search:{terms_query}')
+        self.logger = logging.getLogger('OpenAlexSearcher')
+        self.logger.setLevel(logging.INFO)
         
-        # Filter for recent publications (last 5 years)
-        current_year = datetime.now().year
-        query_parts.append(f'publication_year:{current_year-5}-{current_year}')
-        
-        return ' AND '.join(query_parts)
-    
-    def _parse_response(self, result: Dict) -> ResearchResource:
-        """Parse OpenAlex API response into ResearchResource object."""
-        authors = [
-            author.get('author', {}).get('display_name', 'Unknown Author')
-            for author in result.get('authorships', [])
-        ]
-        
-        # Get primary institution if available
-        institution = None
-        if result.get('authorships') and result['authorships'][0].get('institutions'):
-            institution = result['authorships'][0]['institutions'][0].get('display_name')
-        
-        # Extract concepts
-        concepts = [
-            concept.get('display_name')
-            for concept in result.get('concepts', [])
-            if concept.get('display_name')
-        ]
-        
-        return ResearchResource(
-            title=result.get('title', 'Untitled'),
-            authors=authors,
-            publication_date=result.get('publication_date', 'Unknown'),
-            doi=result.get('doi'),
-            citations_count=result.get('cited_by_count', 0),
-            concepts=concepts,
-            institution=institution,
-            publication_type=result.get('type', 'Unknown'),
-            abstract=result.get('abstract')
-        )
-    
-    def search(self, structured_query: Dict, max_results: int = 50) -> List[ResearchResource]:
-        """
-        Search for research resources using the OpenAlex API.
-        
-        Args:
-            structured_query: Dictionary containing query information from QueryProcessor
-            max_results: Maximum number of results to return
-            
-        Returns:
-            List of ResearchResource objects
-        """
-        query_string = self._construct_query(structured_query)
-        results = []
-        page = 1
-        per_page = min(max_results, 50)  # OpenAlex maximum per page
-        
-        try:
-            while len(results) < max_results:
-                response = self.session.get(
-                    f"{self.BASE_URL}/works",
-                    params={
-                        'filter': query_string,
-                        'per-page': per_page,
-                        'page': page,
-                        'sort': 'cited_by_count:desc'  # Sort by citation count
-                    }
-                )
-                response.raise_for_status()
-                data = response.json()
-                
-                if not data.get('results'):
-                    break
-                    
-                for result in data['results']:
-                    results.append(self._parse_response(result))
-                    if len(results) >= max_results:
-                        break
-                
-                page += 1
-                time.sleep(1)  # Rate limiting
-                
-        except requests.exceptions.RequestException as e:
-            print(f"Error searching OpenAlex API: {str(e)}")
-            return results
-        
-        return results
-    
-    def filter_results(
+        if not self.logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            handler.setFormatter(formatter)
+            self.logger.addHandler(handler)
+
+    def _make_request(
         self,
-        resources: List[ResearchResource],
-        min_citations: int = 0,
-        required_concepts: List[str] = None
-    ) -> List[ResearchResource]:
+        endpoint: str,
+        params: Optional[Dict] = None,
+        method: str = 'GET'
+    ) -> Dict:
+        """Make an API request with retry logic and rate limiting"""
+        url = f"{self.base_url}/{endpoint}"
+        if params is None:
+            params = {}
+        
+        params['mailto'] = self.email
+        
+        for attempt in range(self.max_retries):
+            try:
+                prepared_request = requests.Request(
+                    method,
+                    url,
+                    params=params
+                ).prepare()
+                
+                self.logger.info(f"Making API request: {prepared_request.url}")
+                
+                response = self.session.send(prepared_request)
+                
+                if response.status_code != 200:
+                    error_message = f"API Error: {response.status_code}"
+                    self.logger.error(error_message)
+                    
+                    if response.status_code == 429:
+                        wait_time = float(response.headers.get('Retry-After', self.rate_limit_delay * 2))
+                        self.logger.warning(f"Rate limit exceeded. Waiting {wait_time} seconds.")
+                        time.sleep(wait_time)
+                        continue
+                    
+                    return {'error': error_message}
+                
+                return response.json()
+                
+            except requests.exceptions.RequestException as e:
+                self.logger.error(f"Request failed (attempt {attempt + 1}/{self.max_retries}): {str(e)}")
+                if attempt == self.max_retries - 1:
+                    return {'error': str(e)}
+                time.sleep(self.rate_limit_delay * (attempt + 1))
+            
+            time.sleep(self.rate_limit_delay)
+        
+        return {'error': 'Max retries exceeded'}
+
+    def _construct_search_filter(self, query: str, from_year: Optional[int] = None) -> str:
+        """Construct OpenAlex filter string"""
+        filters = []
+        
+        # Add display name search
+        if query:
+            filters.append(f'display_name.search:"{query}"')
+        
+        # Add publication year filter if specified
+        if from_year:
+            current_year = datetime.now().year
+            filters.append(f'last_known_year:{from_year}-{current_year}')
+        
+        return ' AND '.join(filters)
+
+    def search_experts(
+        self,
+        query: str,
+        from_year: Optional[int] = None,
+        max_results: int = 20,
+        min_works: Optional[int] = None,
+        min_citations: Optional[int] = None,
+        page: int = 1,
+        per_page: int = 50
+    ) -> SearchResponse:
         """
-        Filter research resources based on criteria.
+        Search for experts using OpenAlex API
         
         Args:
-            resources: List of ResearchResource objects
+            query: Search query string
+            from_year: Filter results from this year onwards
+            max_results: Maximum number of experts to return
+            min_works: Minimum number of works required
             min_citations: Minimum number of citations required
-            required_concepts: List of concepts that must be present
-            
-        Returns:
-            Filtered list of ResearchResource objects
+            page: Page number for pagination
+            per_page: Results per page (max 200)
         """
-        filtered = []
-        for resource in resources:
-            if resource.citations_count < min_citations:
-                continue
-                
-            if required_concepts and not any(
-                concept in resource.concepts
-                for concept in required_concepts
-            ):
-                continue
-                
-            filtered.append(resource)
+        filter_string = self._construct_search_filter(query, from_year)
+        
+        params = {
+            'filter': filter_string,
+            'per-page': min(per_page, 200),
+            'page': page,
+            'sort': 'cited_by_count:desc'
+        }
+        
+        if min_citations:
+            params['filter'] += f' AND cited_by_count:>={min_citations}'
             
-        return filtered
+        if min_works:
+            params['filter'] += f' AND works_count:>={min_works}'
+        
+        response_data = self._make_request('authors', params)
+        
+        if 'error' in response_data:
+            return SearchResponse(
+                status_code=500,
+                experts=[],
+                error=response_data['error']
+            )
+        
+        experts = []
+        for expert_data in response_data.get('results', [])[:max_results]:
+            experts.append(ExpertResult.from_api_response(expert_data))
+        
+        return SearchResponse(
+            status_code=200,
+            experts=experts,
+            meta=response_data.get('meta')
+        )
+
+    def get_expert_details(self, expert_id: str) -> Dict:
+        """Get detailed information about a specific expert"""
+        if 'openalex.org' in expert_id:
+            expert_id = expert_id.split('/')[-1]
+            
+        return self._make_request(f'authors/{expert_id}')
+
+    def filter_experts(
+        self,
+        experts: List[ExpertResult],
+        concept_ids: Optional[List[str]] = None,
+        min_citations: Optional[int] = None,
+        min_works: Optional[int] = None
+    ) -> List[ExpertResult]:
+        """
+        Filter experts based on various criteria
+        
+        Args:
+            experts: List of ExpertResult objects
+            concept_ids: List of OpenAlex concept IDs to filter by
+            min_citations: Minimum number of citations required
+            min_works: Minimum number of works required
+        """
+        filtered_experts = experts
+        
+        if concept_ids:
+            filtered_experts = [
+                expert for expert in filtered_experts
+                if any(
+                    concept['id'] in concept_ids
+                    for concept in expert.concepts
+                )
+            ]
+        
+        if min_citations is not None:
+            filtered_experts = [
+                expert for expert in filtered_experts
+                if expert.citations_count >= min_citations
+            ]
+            
+        if min_works is not None:
+            filtered_experts = [
+                expert for expert in filtered_experts
+                if expert.works_count >= min_works
+            ]
+        
+        return filtered_experts
 
 def create_searcher(email: str) -> OpenAlexSearcher:
-    """Factory function to create an OpenAlexSearcher instance."""
+    """Factory function to create an OpenAlexSearcher instance"""
     return OpenAlexSearcher(email)
+
+searcher = create_searcher("lchen")
+
+# Search for experts
+response = searcher.search_experts(
+    query="machine learning neural networks",
+    from_year=2018,
+    max_results=10,
+    min_citations=0,
+    min_works=20
+)
+
+# Filter results if needed
+filtered_experts = searcher.filter_experts(
+    response.experts,
+    concept_ids=["C154945302"],  # OpenAlex concept ID for machine learning
+    min_citations=2000
+)
