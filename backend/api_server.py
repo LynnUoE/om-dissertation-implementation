@@ -40,7 +40,7 @@ class Config:
             raise ValueError(f"Static folder does not exist: {cls.STATIC_FOLDER}")
 
 # Initialize Flask application
-app = Flask(__name__, static_folder=Config.STATIC_FOLDER)
+app = Flask(__name__, static_folder=Config.STATIC_FOLDER, static_url_path='')
 CORS(app)  # Enable CORS for all routes
 
 # Configure logging
@@ -81,7 +81,16 @@ def index():
 def static_files(path):
     """Serve static files"""
     try:
-        return send_from_directory(app.static_folder, path)
+        # Check if the file exists in the static folder
+        file_path = os.path.join(app.static_folder, path)
+        if os.path.isfile(file_path):
+            return send_from_directory(app.static_folder, path)
+        else:
+            # Special handling for HTML pages
+            if path.endswith('.html'):
+                return send_from_directory(app.static_folder, path)
+            # For other paths, return the index for client-side routing
+            return send_from_directory(app.static_folder, 'index.html')
     except:
         # If the file doesn't exist, return the index for client-side routing
         return send_from_directory(app.static_folder, 'index.html')
@@ -435,6 +444,27 @@ def process_query():
             'status': 'error',
             'message': f'An error occurred while processing your query: {str(e)}'
         }), 500
+
+# Additional route to explicitly handle result.html
+@app.route('/result.html')
+def results_page():
+    """Explicitly serve the results page"""
+    return send_from_directory(app.static_folder, 'result.html')
+
+@app.route('/publication.html')
+def publication_page():
+    """Explicitly serve the publication page"""
+    return send_from_directory(app.static_folder, 'publication.html')
+
+@app.route('/js/<path:filename>')
+def serve_js(filename):
+    """Serve JavaScript files"""
+    return send_from_directory(os.path.join(app.static_folder, 'js'), filename)
+
+@app.route('/css/<path:filename>')
+def serve_css(filename):
+    """Serve CSS files"""
+    return send_from_directory(os.path.join(app.static_folder, 'css'), filename)
 
 # Error handlers
 @app.errorhandler(404)

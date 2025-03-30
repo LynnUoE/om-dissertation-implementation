@@ -3,74 +3,17 @@
  * Manages and displays search results for literature search
  */
 
-// Define fallback loading functions if they don't exist
-if (typeof window.showLoading !== 'function') {
-    window.showLoading = function(message) {
-        console.log('Loading started:', message || 'Processing request...');
-        // Create a basic loading indicator if it doesn't exist
-        let loadingOverlay = document.getElementById('loading-overlay');
-        if (!loadingOverlay) {
-            loadingOverlay = document.createElement('div');
-            loadingOverlay.id = 'loading-overlay';
-            loadingOverlay.style.position = 'fixed';
-            loadingOverlay.style.top = '0';
-            loadingOverlay.style.left = '0';
-            loadingOverlay.style.width = '100%';
-            loadingOverlay.style.height = '100%';
-            loadingOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-            loadingOverlay.style.display = 'flex';
-            loadingOverlay.style.justifyContent = 'center';
-            loadingOverlay.style.alignItems = 'center';
-            loadingOverlay.style.zIndex = '9999';
-            
-            const spinnerContainer = document.createElement('div');
-            spinnerContainer.style.textAlign = 'center';
-            spinnerContainer.style.color = 'white';
-            
-            const spinner = document.createElement('div');
-            spinner.style.border = '5px solid rgba(255, 255, 255, 0.3)';
-            spinner.style.borderTop = '5px solid white';
-            spinner.style.borderRadius = '50%';
-            spinner.style.width = '50px';
-            spinner.style.height = '50px';
-            spinner.style.margin = '0 auto 15px auto';
-            spinner.style.animation = 'spin 1s linear infinite';
-            
-            const style = document.createElement('style');
-            style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
-            
-            const text = document.createElement('p');
-            text.textContent = message || 'Processing request...';
-            
-            spinnerContainer.appendChild(spinner);
-            spinnerContainer.appendChild(text);
-            loadingOverlay.appendChild(spinnerContainer);
-            document.head.appendChild(style);
-            document.body.appendChild(loadingOverlay);
-        } else {
-            loadingOverlay.style.display = 'flex';
-            const messageElement = loadingOverlay.querySelector('p');
-            if (messageElement && message) {
-                messageElement.textContent = message;
-            }
-        }
-    };
-}
-
-if (typeof window.hideLoading !== 'function') {
-    window.hideLoading = function() {
-        console.log('Loading finished');
-        const loadingOverlay = document.getElementById('loading-overlay');
-        if (loadingOverlay) {
-            loadingOverlay.style.display = 'none';
-        }
-    };
-}
-
 document.addEventListener('DOMContentLoaded', function() {
+    console.log("Result handler initialized");
+    
     // Check if we're on the results page
     const publicationsContainer = document.getElementById('publications-container');
-    if (!publicationsContainer) return;
+    if (!publicationsContainer) {
+        console.log('Not on results page - publications container not found');
+        return;
+    }
+    
+    console.log('On results page - initializing');
     
     // Initialize the results page
     initializeResultsPage();
@@ -84,24 +27,36 @@ document.addEventListener('DOMContentLoaded', function() {
  */
 async function initializeResultsPage() {
     try {
-        // Show loading indicator with safe check
-        try {
+        console.log("Initializing results page");
+        
+        // Show loading indicator if available
+        if (typeof window.showLoading === 'function') {
             window.showLoading("Loading search results...");
-        } catch (loadingError) {
-            console.warn("Loading indicator error:", loadingError);
         }
         
         // Get stored search results from session storage
         const searchResultsJson = sessionStorage.getItem('search_results');
         if (!searchResultsJson) {
-            redirectToHome();
+            console.error('No search results found in session storage');
+            displayErrorMessage('No search results found. Please try a new search.');
             return;
         }
         
-        const searchResults = JSON.parse(searchResultsJson);
+        console.log('Retrieved search results from session storage');
+        
+        let searchResults;
+        try {
+            searchResults = JSON.parse(searchResultsJson);
+            console.log('Parsed search results:', searchResults);
+        } catch (parseError) {
+            console.error('Error parsing search results JSON:', parseError);
+            displayErrorMessage('Error loading search results. Please try a new search.');
+            return;
+        }
         
         // Check if results were found
         if (searchResults.status !== 'success') {
+            console.error('Search results status not success:', searchResults.status);
             displayErrorMessage(searchResults.message || 'Error retrieving search results');
             return;
         }
@@ -111,20 +66,24 @@ async function initializeResultsPage() {
         
         // Display publication results
         if (searchResults.results && searchResults.results.length > 0) {
+            console.log(`Displaying ${searchResults.results.length} publication results`);
             displayPublicationResults(searchResults.results);
             updateResultsCount(searchResults.results.length);
         } else {
+            console.log('No publication results to display');
             displayNoResults();
         }
         
         // Display analysis if available
         if (searchResults.analysis) {
+            console.log('Displaying analysis');
             displayAnalysis(searchResults.analysis);
         }
         
         // Display interdisciplinary analysis if available
         const isInterdisciplinary = sessionStorage.getItem('is_interdisciplinary') === 'true';
         if (isInterdisciplinary && searchResults.interdisciplinary_analysis) {
+            console.log('Displaying interdisciplinary analysis');
             displayInterdisciplinaryAnalysis(searchResults.interdisciplinary_analysis, searchResults.interdisciplinary_synthesis);
         }
         
@@ -135,32 +94,39 @@ async function initializeResultsPage() {
         console.error('Error initializing results page:', error);
         displayErrorMessage('There was an error loading the results. Please try a new search.');
     } finally {
-        // Hide loading indicator with safe check
-        try {
+        // Hide loading indicator if available
+        if (typeof window.hideLoading === 'function') {
             window.hideLoading();
-        } catch (loadingError) {
-            console.warn("Loading indicator error:", loadingError);
         }
     }
 }
-
 
 /**
  * Display query summary information
  */
 function displayQuerySummary(searchResults) {
+    console.log('Displaying query summary');
+    
     // Original query from session storage
     const originalQuery = sessionStorage.getItem('original_query');
+    console.log('Original query:', originalQuery);
     
     // Set original query text
     const queryTextElement = document.getElementById('original-query');
     if (queryTextElement && originalQuery) {
         queryTextElement.textContent = originalQuery;
+    } else if (queryTextElement) {
+        queryTextElement.textContent = 'Query not available';
     }
     
     // Get structured query from search results
     const structuredQuery = searchResults.structured_query;
-    if (!structuredQuery) return;
+    if (!structuredQuery) {
+        console.warn('No structured query in search results');
+        return;
+    }
+    
+    console.log('Structured query:', structuredQuery);
     
     // Set research areas tags
     const researchAreasContainer = document.getElementById('research-areas-tags');
@@ -193,12 +159,18 @@ function displayQuerySummary(searchResults) {
  * Display publication results
  */
 function displayPublicationResults(publications) {
+    console.log(`Creating ${publications.length} publication cards`);
+    
     const container = document.getElementById('publications-container');
-    if (!container) return;
+    if (!container) {
+        console.error('Publications container not found');
+        return;
+    }
     
     container.innerHTML = '';
     
-    publications.forEach(publication => {
+    publications.forEach((publication, index) => {
+        console.log(`Creating card for publication ${index + 1}:`, publication.title);
         const publicationCard = createPublicationCard(publication);
         container.appendChild(publicationCard);
     });
@@ -212,20 +184,31 @@ function createPublicationCard(publication) {
     card.className = 'publication-card';
     
     // Get top topic match for display
-    const topTopic = Object.entries(publication.topic_matches || {})
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 1)[0] || ['No matching topic', 0];
+    let topTopic = ['No matching topic', 0];
+    if (publication.topic_matches && Object.keys(publication.topic_matches).length > 0) {
+        topTopic = Object.entries(publication.topic_matches)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 1)[0];
+    }
     
     // Format publication date
-    const pubDate = publication.publication_date ? 
-        new Date(publication.publication_date).getFullYear() : 'N/A';
+    let pubDate = 'N/A';
+    if (publication.publication_date) {
+        try {
+            pubDate = new Date(publication.publication_date).getFullYear();
+        } catch (e) {
+            console.warn('Error formatting date:', e);
+            pubDate = publication.publication_date;
+        }
+    }
     
     // Truncate abstract
-    const abstract = publication.abstract ? 
-        (publication.abstract.length > 250 ? 
+    let abstract = 'No abstract available.';
+    if (publication.abstract) {
+        abstract = publication.abstract.length > 250 ? 
             publication.abstract.substring(0, 250) + '...' : 
-            publication.abstract) : 
-        'No abstract available.';
+            publication.abstract;
+    }
     
     // Determine publication type icon and label
     let pubTypeIcon = 'fas fa-file-alt';
@@ -254,7 +237,7 @@ function createPublicationCard(publication) {
             break;
     }
     
-    const topicPercentage = Math.round(topTopic[1] * 100);
+    const topicPercentage = Math.round((topTopic[1] || 0) * 100);
     
     card.innerHTML = `
         <div class="publication-info">
@@ -409,7 +392,7 @@ function displayNoResults() {
     const newSearchButton = document.getElementById('new-search');
     if (newSearchButton) {
         newSearchButton.addEventListener('click', function() {
-            window.location.href = 'index.html';
+            window.location.href = '/';
         });
     }
     
@@ -421,6 +404,8 @@ function displayNoResults() {
  * Display error message
  */
 function displayErrorMessage(message) {
+    console.error('Displaying error message:', message);
+    
     const container = document.getElementById('publications-container');
     if (!container) return;
     
@@ -439,7 +424,7 @@ function displayErrorMessage(message) {
     const returnButton = document.getElementById('return-home');
     if (returnButton) {
         returnButton.addEventListener('click', function() {
-            window.location.href = 'index.html';
+            window.location.href = '/';
         });
     }
 }
@@ -448,7 +433,7 @@ function displayErrorMessage(message) {
  * Redirect to home page
  */
 function redirectToHome() {
-    window.location.href = 'index.html';
+    window.location.href = '/';
 }
 
 /**
@@ -459,7 +444,7 @@ function setupModifySearchButton() {
     if (!modifyButton) return;
     
     modifyButton.addEventListener('click', function() {
-        window.location.href = 'index.html';
+        window.location.href = '/';
     });
 }
 

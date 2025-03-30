@@ -3,70 +3,6 @@
  * Handles research query submission and processing
  */
 
-// Define fallback loading functions if they don't exist
-if (typeof window.showLoading !== 'function') {
-    window.showLoading = function(message) {
-        console.log('Loading started:', message || 'Processing request...');
-        // Create a basic loading indicator if it doesn't exist
-        let loadingOverlay = document.getElementById('loading-overlay');
-        if (!loadingOverlay) {
-            loadingOverlay = document.createElement('div');
-            loadingOverlay.id = 'loading-overlay';
-            loadingOverlay.style.position = 'fixed';
-            loadingOverlay.style.top = '0';
-            loadingOverlay.style.left = '0';
-            loadingOverlay.style.width = '100%';
-            loadingOverlay.style.height = '100%';
-            loadingOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
-            loadingOverlay.style.display = 'flex';
-            loadingOverlay.style.justifyContent = 'center';
-            loadingOverlay.style.alignItems = 'center';
-            loadingOverlay.style.zIndex = '9999';
-            
-            const spinnerContainer = document.createElement('div');
-            spinnerContainer.style.textAlign = 'center';
-            spinnerContainer.style.color = 'white';
-            
-            const spinner = document.createElement('div');
-            spinner.style.border = '5px solid rgba(255, 255, 255, 0.3)';
-            spinner.style.borderTop = '5px solid white';
-            spinner.style.borderRadius = '50%';
-            spinner.style.width = '50px';
-            spinner.style.height = '50px';
-            spinner.style.margin = '0 auto 15px auto';
-            spinner.style.animation = 'spin 1s linear infinite';
-            
-            const style = document.createElement('style');
-            style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
-            
-            const text = document.createElement('p');
-            text.textContent = message || 'Processing request...';
-            
-            spinnerContainer.appendChild(spinner);
-            spinnerContainer.appendChild(text);
-            loadingOverlay.appendChild(spinnerContainer);
-            document.head.appendChild(style);
-            document.body.appendChild(loadingOverlay);
-        } else {
-            loadingOverlay.style.display = 'flex';
-            const messageElement = loadingOverlay.querySelector('p');
-            if (messageElement && message) {
-                messageElement.textContent = message;
-            }
-        }
-    };
-}
-
-if (typeof window.hideLoading !== 'function') {
-    window.hideLoading = function() {
-        console.log('Loading finished');
-        const loadingOverlay = document.getElementById('loading-overlay');
-        if (loadingOverlay) {
-            loadingOverlay.style.display = 'none';
-        }
-    };
-}
-
 document.addEventListener('DOMContentLoaded', function() {
     // For the query form
     const queryForm = document.getElementById('research-query-form');
@@ -100,11 +36,9 @@ function initializeQueryForm(form) {
                 return;
             }
             
-            // Show loading indicator with safe check
-            try {
+            // Show loading indicator
+            if (typeof window.showLoading === 'function') {
                 window.showLoading("Processing your search query...");
-            } catch (loadingError) {
-                console.warn("Loading indicator error:", loadingError);
             }
             
             // Get form data
@@ -115,8 +49,7 @@ function initializeQueryForm(form) {
             
             console.log("Processing query:", queryData.query);
             
-            // Perform the literature search directly
-            // Skip the separate query processing step which might cause issues
+            // Perform the literature search
             const searchOptions = {
                 max_results: 20,
                 analyze_results: true
@@ -148,32 +81,38 @@ function initializeQueryForm(form) {
             
             // Perform the search
             console.log("Sending search request with options:", searchOptions);
-            const searchResult = await ApiService.searchLiterature(queryData.query, searchOptions);
             
-            // Add validation for search result structure
-            if (!searchResult) {
-                throw new Error('Received empty response from search API');
+            try {
+                const searchResult = await ApiService.searchLiterature(queryData.query, searchOptions);
+                
+                // Add validation for search result structure
+                if (!searchResult) {
+                    throw new Error('Received empty response from search API');
+                }
+                
+                if (searchResult.status !== 'success') {
+                    throw new Error(searchResult.message || 'Error searching literature');
+                }
+                
+                // Ensure search result has expected properties
+                if (!searchResult.results) {
+                    console.warn('Search response is missing results array');
+                    searchResult.results = [];
+                }
+                
+                if (!searchResult.structured_query) {
+                    searchResult.structured_query = {};
+                }
+                
+                // Store search results for the results page
+                sessionStorage.setItem('search_results', JSON.stringify(searchResult));
+                
+                // Navigate to results page
+                window.location.href = '/result.html';
+            } catch (searchError) {
+                console.error('Search API error:', searchError);
+                alert(`Search failed: ${searchError.message || 'Unknown error'}`);
             }
-            
-            if (searchResult.status !== 'success') {
-                throw new Error(searchResult.message || 'Error searching literature');
-            }
-            
-            // Ensure search result has expected properties
-            if (!searchResult.results) {
-                console.warn('Search response is missing results array');
-                searchResult.results = [];
-            }
-            
-            if (!searchResult.structured_query) {
-                searchResult.structured_query = {};
-            }
-            
-            // Store search results for the results page
-            sessionStorage.setItem('search_results', JSON.stringify(searchResult));
-            
-            // Navigate to results page
-            window.location.href = 'results.html';
             
         } catch (error) {
             console.error('Error processing query:', error);
@@ -189,11 +128,9 @@ function initializeQueryForm(form) {
             
             alert(errorMessage);
         } finally {
-            // Hide loading indicator with safe check
-            try {
+            // Hide loading indicator
+            if (typeof window.hideLoading === 'function') {
                 window.hideLoading();
-            } catch (loadingError) {
-                console.warn("Loading indicator error:", loadingError);
             }
         }
     });
@@ -226,10 +163,8 @@ function initializeAdvancedSearchForm(form) {
             }
             
             // Show loading indicator with safe check
-            try {
+            if (typeof window.showLoading === 'function') {
                 window.showLoading("Processing advanced search...");
-            } catch (loadingError) {
-                console.warn("Loading indicator error:", loadingError);
             }
             
             // Get form data
@@ -292,17 +227,15 @@ function initializeAdvancedSearchForm(form) {
             sessionStorage.setItem('search_results', JSON.stringify(searchResult));
             
             // Navigate to results page
-            window.location.href = 'results.html';
+            window.location.href = '/result.html';
             
         } catch (error) {
             console.error('Error performing advanced search:', error);
             alert(`Advanced search error: ${error.message}`);
         } finally {
             // Hide loading indicator with safe check
-            try {
+            if (typeof window.hideLoading === 'function') {
                 window.hideLoading();
-            } catch (loadingError) {
-                console.warn("Loading indicator error:", loadingError);
             }
         }
     });
@@ -327,10 +260,8 @@ function initializeInterdisciplinaryForm(form) {
             }
             
             // Show loading indicator with safe check
-            try {
+            if (typeof window.showLoading === 'function') {
                 window.showLoading("Processing interdisciplinary search...");
-            } catch (loadingError) {
-                console.warn("Loading indicator error:", loadingError);
             }
             
             // Get form data
@@ -389,17 +320,15 @@ function initializeInterdisciplinaryForm(form) {
             sessionStorage.setItem('is_interdisciplinary', 'true');
             
             // Navigate to results page
-            window.location.href = 'results.html';
+            window.location.href = '/result.html';
             
         } catch (error) {
             console.error('Error performing interdisciplinary search:', error);
             alert(`Interdisciplinary search error: ${error.message}`);
         } finally {
             // Hide loading indicator with safe check
-            try {
+            if (typeof window.hideLoading === 'function') {
                 window.hideLoading();
-            } catch (loadingError) {
-                console.warn("Loading indicator error:", loadingError);
             }
         }
     });
@@ -449,6 +378,27 @@ function initializeTagsInput(form) {
             }
         });
     });
+}
+
+/**
+ * Add a new tag to a tags input container
+ */
+function addTag(container, text) {
+    const tag = document.createElement('span');
+    tag.classList.add('tag');
+    tag.innerHTML = `
+        ${text}
+        <span class="tag-remove">&times;</span>
+    `;
+    
+    // Add remove event listener
+    tag.querySelector('.tag-remove').addEventListener('click', function() {
+        tag.remove();
+    });
+    
+    // Insert before the input
+    const input = container.querySelector('input');
+    container.insertBefore(tag, input);
 }
 
 /**
@@ -598,27 +548,6 @@ function getTags(containerId) {
         // Get text without the remove button
         return tag.textContent.trim().replace('×', '');
     });
-}
-
-/**
- * Add a new tag to a tags input container
- */
-function addTag(container, text) {
-    const tag = document.createElement('span');
-    tag.classList.add('tag');
-    tag.innerHTML = `
-        ${text}
-        <span class="tag-remove">&times;</span>
-    `;
-    
-    // Add remove event listener
-    tag.querySelector('.tag-remove').addEventListener('click', function() {
-        tag.remove();
-    });
-    
-    // Insert before the input
-    const input = container.querySelector('input');
-    container.insertBefore(tag, input);
 }
 
 /**
