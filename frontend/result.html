@@ -78,19 +78,9 @@
                         <div class="filter-section">
                             <h3>Filter Results</h3>
                             <div class="filter-group">
-                                <h4>Publication Type</h4>
-                                <div class="checkbox-group">
-                                    <label><input type="checkbox" checked> Journal Articles</label>
-                                    <label><input type="checkbox" checked> Conference Papers</label>
-                                    <label><input type="checkbox" checked> Reviews</label>
-                                    <label><input type="checkbox" checked> Book Chapters</label>
-                                    <label><input type="checkbox" checked> Preprints</label>
-                                </div>
-                            </div>
-                            <div class="filter-group">
                                 <h4>Publication Year</h4>
                                 <div class="range-slider">
-                                    <input type="range" min="2000" max="2025" value="2000" id="year-filter">
+                                    <input type="range" min="1900" max="2025" value="2000" id="year-filter">
                                     <div class="range-values">
                                         <span id="min-year-value">2000</span>
                                         <span>2025</span>
@@ -105,12 +95,6 @@
                                         <span id="min-citations-value">0</span>
                                         <span>500+</span>
                                     </div>
-                                </div>
-                            </div>
-                            <div class="filter-group">
-                                <h4>Open Access</h4>
-                                <div class="checkbox-group">
-                                    <label><input type="checkbox"> Open Access Only</label>
                                 </div>
                             </div>
                         </div>
@@ -135,33 +119,6 @@
                             <button class="btn btn-pagination" disabled><i class="fas fa-chevron-right"></i></button>
                         </div>
                     </div>
-                </div>
-                
-                <!-- Analysis section -->
-                <div id="analysis-container" class="analysis-container hidden">
-                    <h2>Literature Analysis</h2>
-                    <div class="analysis-tabs">
-                        <button class="analysis-tab active" data-tab="literature-summary">Summary</button>
-                        <button class="analysis-tab" data-tab="methodology-analysis">Methodology</button>
-                        <button class="analysis-tab" data-tab="research-synthesis">Synthesis</button>
-                    </div>
-                    <div class="analysis-content">
-                        <div id="literature-summary" class="analysis-panel active">
-                            <!-- Literature summary will be populated here -->
-                        </div>
-                        <div id="methodology-analysis" class="analysis-panel">
-                            <!-- Methodology analysis will be populated here -->
-                        </div>
-                        <div id="research-synthesis" class="analysis-panel">
-                            <!-- Research synthesis will be populated here -->
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Interdisciplinary analysis section -->
-                <div id="interdisciplinary-analysis" class="interdisciplinary-container hidden">
-                    <h2>Interdisciplinary Research Analysis</h2>
-                    <!-- Interdisciplinary analysis will be populated here -->
                 </div>
             </div>
         </section>

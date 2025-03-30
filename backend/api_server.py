@@ -40,7 +40,7 @@ class Config:
             raise ValueError(f"Static folder does not exist: {cls.STATIC_FOLDER}")
 
 # Initialize Flask application
-app = Flask(__name__, static_folder=Config.STATIC_FOLDER, static_url_path='')
+app = Flask(__name__, static_folder=Config.STATIC_FOLDER)
 CORS(app)  # Enable CORS for all routes
 
 # Configure logging
@@ -81,16 +81,7 @@ def index():
 def static_files(path):
     """Serve static files"""
     try:
-        # Check if the file exists in the static folder
-        file_path = os.path.join(app.static_folder, path)
-        if os.path.isfile(file_path):
-            return send_from_directory(app.static_folder, path)
-        else:
-            # Special handling for HTML pages
-            if path.endswith('.html'):
-                return send_from_directory(app.static_folder, path)
-            # For other paths, return the index for client-side routing
-            return send_from_directory(app.static_folder, 'index.html')
+        return send_from_directory(app.static_folder, path)
     except:
         # If the file doesn't exist, return the index for client-side routing
         return send_from_directory(app.static_folder, 'index.html')
@@ -137,7 +128,8 @@ def search_literature():
         min_citations = options.get('min_citations')
         publication_types = options.get('publication_types')
         open_access_only = options.get('open_access_only', False)
-        analyze_results = options.get('analyze_results', True)
+        # Set analyze_results to False by default
+        analyze_results = options.get('analyze_results', False)
         
         # Create request timeout context
         def timeout_handler():
@@ -223,7 +215,8 @@ def advanced_search():
         max_results = min(options.get('max_results', Config.MAX_RESULTS), 50)
         from_year = options.get('from_year')
         to_year = options.get('to_year')
-        analyze_results = options.get('analyze_results', True)
+        # Set analyze_results to False by default
+        analyze_results = options.get('analyze_results', False)
         
         # Perform advanced search
         searcher = get_literature_searcher()
@@ -298,6 +291,8 @@ def interdisciplinary_search():
         max_results = min(options.get('max_results', Config.MAX_RESULTS), 50)
         from_year = options.get('from_year')
         recent_years = options.get('recent_years', 5)
+        # Set analyze_results to False by default
+        analyze_results = options.get('analyze_results', False)
         
         # Perform interdisciplinary search
         searcher = get_literature_searcher()
@@ -306,7 +301,8 @@ def interdisciplinary_search():
             secondary_disciplines=secondary_disciplines,
             max_results=max_results,
             from_year=from_year,
-            recent_years=recent_years
+            recent_years=recent_years,
+            analyze_results=analyze_results
         )
         
         # Log results
@@ -339,13 +335,13 @@ def interdisciplinary_search():
             'message': f'An error occurred while processing your request: {str(e)}'
         }), 500
 
-@app.route('/api/publication/<publication_id>', methods=['GET'])
+@app.route('/api/publication/<path:publication_id>', methods=['GET'])
 def get_publication_details(publication_id):
     """
     Get detailed information about a specific publication
     
     Args:
-        publication_id: Publication identifier
+        publication_id: Publication identifier (can include full DOI URL)
     """
     start_time = time.time()
     request_stats['total_requests'] += 1
@@ -358,6 +354,8 @@ def get_publication_details(publication_id):
                 'status': 'error',
                 'message': 'Missing publication ID'
             }), 400
+        
+        logger.info(f"Publication detail request for: {publication_id}")
         
         # Get publication details
         searcher = get_literature_searcher()
@@ -389,6 +387,67 @@ def get_publication_details(publication_id):
         return jsonify({
             'status': 'error',
             'message': f'An error occurred while retrieving publication details: {str(e)}',
+            'publication_id': publication_id
+        }), 500
+
+@app.route('/api/publication/<publication_id>/analyze', methods=['GET'])
+def analyze_publication(publication_id):
+    """
+    Analyze a specific publication in detail
+    
+    Args:
+        publication_id: Publication identifier
+    """
+    start_time = time.time()
+    request_stats['total_requests'] += 1
+    
+    try:
+        # Validate publication ID
+        if not publication_id:
+            request_stats['failed_requests'] += 1
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing publication ID'
+            }), 400
+        
+        # Get query context from request if available
+        query_context = request.args.get('query_context')
+        if query_context:
+            try:
+                query_context = json.loads(query_context)
+            except:
+                query_context = None
+        
+        # Analyze publication
+        searcher = get_literature_searcher()
+        result = searcher.analyze_single_publication(publication_id, query_context)
+        
+        # Log results
+        if result['status'] == 'success':
+            logger.info(f"Publication analysis successful: '{publication_id}'")
+            request_stats['successful_requests'] += 1
+        else:
+            logger.error(f"Publication analysis failed: '{publication_id}' - {result.get('message', 'Unknown error')}")
+            request_stats['failed_requests'] += 1
+        
+        # Update average response time
+        elapsed_time = time.time() - start_time
+        request_stats['average_response_time'] = (
+            (request_stats['average_response_time'] * (request_stats['total_requests'] - 1) + elapsed_time) / 
+            request_stats['total_requests']
+        )
+        
+        # Add response time to result
+        result['response_time'] = elapsed_time
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.exception(f"Error analyzing publication: {str(e)}")
+        request_stats['failed_requests'] += 1
+        return jsonify({
+            'status': 'error',
+            'message': f'An error occurred while analyzing the publication: {str(e)}',
             'publication_id': publication_id
         }), 500
 
@@ -444,27 +503,6 @@ def process_query():
             'status': 'error',
             'message': f'An error occurred while processing your query: {str(e)}'
         }), 500
-
-# Additional route to explicitly handle result.html
-@app.route('/result.html')
-def results_page():
-    """Explicitly serve the results page"""
-    return send_from_directory(app.static_folder, 'result.html')
-
-@app.route('/publication.html')
-def publication_page():
-    """Explicitly serve the publication page"""
-    return send_from_directory(app.static_folder, 'publication.html')
-
-@app.route('/js/<path:filename>')
-def serve_js(filename):
-    """Serve JavaScript files"""
-    return send_from_directory(os.path.join(app.static_folder, 'js'), filename)
-
-@app.route('/css/<path:filename>')
-def serve_css(filename):
-    """Serve CSS files"""
-    return send_from_directory(os.path.join(app.static_folder, 'css'), filename)
 
 # Error handlers
 @app.errorhandler(404)

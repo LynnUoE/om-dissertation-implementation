@@ -4,68 +4,120 @@
  */
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Check if we're on the publication detail page
-    const publicationOverview = document.querySelector('.publication-overview');
-    if (!publicationOverview) return;
-    
     // Get publication ID from URL
     const urlParams = new URLSearchParams(window.location.search);
     const publicationId = urlParams.get('id');
     
-    if (!publicationId) {
-        displayErrorMessage('Publication ID is missing. Please go back to the results page.');
-        return;
+    if (publicationId) {
+        loadPublicationDetails(publicationId);
+    } else {
+        displayError('No publication ID specified');
     }
-    
-    // Load publication data
-    loadPublicationData(publicationId);
     
     // Set up tab switching
     setupTabSwitching();
-    
-    // Set up citation sorting
-    setupCitationSorting();
-    
-    // Set up action buttons
-    setupActionButtons();
 });
 
 /**
- * Load publication data from API or session storage
+ * Load publication data from API
  */
-async function loadPublicationData(publicationId) {
+async function loadPublicationDetails(publicationId) {
     try {
-        window.showLoading();
-        
-        // Try to load from session storage first (if coming from results page)
-        const storedResults = sessionStorage.getItem('publication_results');
-        let publication = null;
-        
-        if (storedResults) {
-            const allPublications = JSON.parse(storedResults);
-            publication = allPublications.find(p => p.id === publicationId);
+        if (typeof window.showLoading === 'function') {
+            window.showLoading("Loading publication details...");
         }
         
-        // If not found in session storage, fetch from API
-        if (!publication) {
-            publication = await apiCall(`/publication/${publicationId}`, 'GET');
+        console.log("Loading publication details for:", publicationId);
+        
+        // Load basic publication details
+        const publicationData = await ApiService.getPublicationDetails(publicationId);
+        
+        if (publicationData.status !== 'success') {
+            throw new Error(publicationData.message || 'Failed to load publication details');
         }
         
-        // Display publication data
-        displayPublicationDetails(publication);
+        // Display basic publication information
+        displayPublicationDetails(publicationData.publication);
         
-        // Load citations if needed
-        if (!publication.citations_list) {
-            await loadPublicationCitations(publicationId);
+        if (publicationData.related_publications && publicationData.related_publications.length > 0) {
+            displayRelatedPublications(publicationData.related_publications);
+        }
+        
+        // Now load analysis separately
+        loadPublicationAnalysis(publicationId);
+        
+    } catch (error) {
+        console.error('Error loading publication details:', error);
+        displayError('Error loading publication details: ' + error.message);
+    } finally {
+        if (typeof window.hideLoading === 'function') {
+            window.hideLoading();
+        }
+    }
+}
+
+/**
+ * Load and display publication analysis
+ */
+async function loadPublicationAnalysis(publicationId) {
+    try {
+        // Show a secondary loading indicator for analysis specifically
+        const analysisContainer = document.getElementById('analysis-container');
+        if (!analysisContainer) return;
+        
+        analysisContainer.innerHTML = `<div class="loading-analysis">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Analyzing publication content...</p>
+        </div>`;
+        
+        // Get query context from session storage if available
+        let queryContext = null;
+        const searchResultsJson = sessionStorage.getItem('search_results');
+        if (searchResultsJson) {
+            try {
+                const searchResults = JSON.parse(searchResultsJson);
+                if (searchResults.structured_query) {
+                    queryContext = {
+                        research_areas: searchResults.structured_query.research_areas || [],
+                        expertise: searchResults.structured_query.expertise || []
+                    };
+                }
+            } catch (e) {
+                console.warn('Error parsing search results for context:', e);
+            }
+        }
+        
+        // Request analysis via the analysis endpoint
+        const analysisData = await ApiService.analyzePublication(publicationId, queryContext);
+        
+        if (analysisData.status === 'success' && analysisData.analysis) {
+            displayPublicationAnalysis(analysisData.analysis);
         } else {
-            displayCitations(publication.citations_list);
+            throw new Error(analysisData.message || 'Failed to analyze publication');
         }
         
     } catch (error) {
-        console.error('Error loading publication data:', error);
-        displayErrorMessage('Could not load publication details. Please try again later.');
-    } finally {
-        window.hideLoading();
+        console.error('Error loading publication analysis:', error);
+        
+        // Show error but don't interrupt viewing the publication
+        const analysisContainer = document.getElementById('analysis-container');
+        if (analysisContainer) {
+            analysisContainer.innerHTML = `<div class="analysis-error">
+                <i class="fas fa-exclamation-circle"></i>
+                <p>Unable to load analysis: ${error.message}</p>
+                <button class="btn btn-outline retry-analysis-btn">
+                    <i class="fas fa-redo"></i> Retry Analysis
+                </button>
+            </div>`;
+            
+            // Add retry event listener
+            const retryButton = analysisContainer.querySelector('.retry-analysis-btn');
+            if (retryButton) {
+                retryButton.addEventListener('click', () => {
+                    loadPublicationAnalysis(publicationId);
+                });
+            }
+        }
     }
 }
 
@@ -152,19 +204,6 @@ function displayPublicationDetails(publication) {
         });
     }
     
-    // Set journal metrics
-    const journalMetrics = document.querySelector('.journal-metrics');
-    if (journalMetrics && publication.journal_metrics) {
-        const impactFactor = journalMetrics.querySelector('.journal-metric:nth-child(1) .metric-value');
-        if (impactFactor) impactFactor.textContent = publication.journal_metrics.impact_factor?.toFixed(2) || 'N/A';
-        
-        const h5Index = journalMetrics.querySelector('.journal-metric:nth-child(2) .metric-value');
-        if (h5Index) h5Index.textContent = publication.journal_metrics.h5_index || 'N/A';
-        
-        const quartile = journalMetrics.querySelector('.journal-metric:nth-child(3) .metric-value');
-        if (quartile) quartile.textContent = publication.journal_metrics.quartile || 'N/A';
-    }
-    
     // Set abstract text
     const abstractContent = document.querySelector('.abstract-content');
     if (abstractContent && publication.abstract) {
@@ -179,81 +218,8 @@ function displayPublicationDetails(publication) {
                 abstractContent.appendChild(p);
             }
         });
-    }
-    
-    // Set keywords
-    const keywordList = document.querySelector('.keyword-list');
-    if (keywordList && publication.keywords) {
-        keywordList.innerHTML = '';
-        
-        publication.keywords.forEach(keyword => {
-            const span = document.createElement('span');
-            span.className = 'keyword';
-            span.textContent = keyword;
-            keywordList.appendChild(span);
-        });
-    }
-    
-    // Set methods content if available
-    if (publication.methods) {
-        const methodsContent = document.querySelector('.methods-content');
-        if (methodsContent) {
-            methodsContent.innerHTML = formatSectionContent(publication.methods);
-        }
-    }
-    
-    // Set findings content if available
-    if (publication.findings) {
-        const findingsContent = document.querySelector('.findings-content');
-        if (findingsContent) {
-            findingsContent.innerHTML = '';
-            
-            publication.findings.forEach((finding, index) => {
-                const findingItem = document.createElement('div');
-                findingItem.className = 'finding-item';
-                
-                findingItem.innerHTML = `
-                    <h3>${finding.title || `Finding ${index + 1}`}</h3>
-                    <p>${finding.description || ''}</p>
-                `;
-                
-                findingsContent.appendChild(findingItem);
-            });
-        }
-    }
-    
-    // Set references if available
-    if (publication.references) {
-        const referenceList = document.querySelector('.reference-list');
-        if (referenceList) {
-            referenceList.innerHTML = '';
-            
-            publication.references.forEach(reference => {
-                const li = document.createElement('li');
-                const p = document.createElement('p');
-                p.className = 'reference-text';
-                p.innerHTML = reference;
-                li.appendChild(p);
-                referenceList.appendChild(li);
-            });
-        }
-    }
-    
-    // Set similar publications
-    if (publication.similar_publications) {
-        const similarList = document.querySelector('.similar-list');
-        if (similarList) {
-            similarList.innerHTML = '';
-            
-            publication.similar_publications.forEach(similar => {
-                const li = document.createElement('li');
-                li.innerHTML = `
-                    <a href="publication.html?id=${similar.id}">${similar.title}</a>
-                    <span class="pub-year">${similar.year}</span>
-                `;
-                similarList.appendChild(li);
-            });
-        }
+    } else if (abstractContent) {
+        abstractContent.innerHTML = '<p>Abstract not available for this publication.</p>';
     }
     
     // Update action buttons based on availability
@@ -261,255 +227,130 @@ function displayPublicationDetails(publication) {
 }
 
 /**
- * Format authors for display
+ * Display related publications
  */
-function formatAuthors(authors) {
-    if (!authors || authors.length === 0) return 'Unknown Authors';
-    return authors.join(', ');
-}
-
-/**
- * Format section content with headings and paragraphs
- */
-function formatSectionContent(content) {
-    if (typeof content === 'string') {
-        return `<p>${content}</p>`;
-    }
-    
-    if (typeof content === 'object') {
-        let html = '';
-        
-        // Process each section
-        for (const [heading, text] of Object.entries(content)) {
-            html += `<h3>${heading}</h3>`;
-            
-            if (Array.isArray(text)) {
-                // If text is an array, create a list
-                html += '<ul>';
-                text.forEach(item => {
-                    html += `<li>${item}</li>`;
-                });
-                html += '</ul>';
-            } else {
-                // Otherwise, create paragraphs
-                html += `<p>${text}</p>`;
-            }
-        }
-        
-        return html;
-    }
-    
-    return '';
-}
-
-/**
- * Load publication citations
- */
-async function loadPublicationCitations(publicationId) {
-    try {
-        // Make API call to get citations
-        const citations = await apiCall(`/publication/${publicationId}/citations`, 'GET');
-        
-        // Display citations
-        displayCitations(citations || []);
-        
-    } catch (error) {
-        console.error('Error loading citations:', error);
-        const citationsTab = document.getElementById('citations-tab');
-        if (citationsTab) {
-            citationsTab.innerHTML += `
-                <p class="error-message">Could not load citations. Please try again later.</p>
-            `;
-        }
-    }
-}
-
-/**
- * Display citations in the citations tab
- */
-function displayCitations(citations) {
-    const citationsList = document.querySelector('.citations-list');
-    if (!citationsList) return;
-    
-    // Clear existing citations
-    citationsList.innerHTML = '';
-    
-    if (citations.length === 0) {
-        citationsList.innerHTML = `
-            <p class="no-citations-message">No citations found for this publication.</p>
-        `;
-        
-        // Hide "See All" button
-        const seeMoreButton = document.querySelector('.see-more button');
-        if (seeMoreButton) {
-            seeMoreButton.style.display = 'none';
-        }
-        
+function displayRelatedPublications(relatedPublications) {
+    const similarList = document.querySelector('.similar-list');
+    if (!similarList || !relatedPublications || relatedPublications.length === 0) {
         return;
     }
     
-    // Display first 3 citations
-    citations.slice(0, 3).forEach(citation => {
-        const citationItem = createCitationItem(citation);
-        citationsList.appendChild(citationItem);
-    });
+    similarList.innerHTML = '';
     
-    // Update "See All" button
-    const seeMoreButton = document.querySelector('.see-more button');
-    if (seeMoreButton) {
-        if (citations.length > 3) {
-            seeMoreButton.textContent = `See All Citations (${citations.length}) `;
-            seeMoreButton.innerHTML += '<i class="fas fa-chevron-down"></i>';
-            seeMoreButton.style.display = 'inline-block';
-            
-            // Store all citations in a data attribute
-            citationsList.dataset.allCitations = JSON.stringify(citations);
-            
-            // Add click event
-            seeMoreButton.addEventListener('click', function() {
-                toggleAllCitations(this);
-            });
-        } else {
-            seeMoreButton.style.display = 'none';
+    relatedPublications.forEach(publication => {
+        const li = document.createElement('li');
+        
+        // Extract year from publication date
+        let year = 'Unknown';
+        if (publication.publication_date) {
+            const date = new Date(publication.publication_date);
+            year = date.getFullYear();
         }
-    }
+        
+        li.innerHTML = `
+            <a href="publication.html?id=${encodeURIComponent(publication.id)}">${publication.title}</a>
+            <span class="pub-year">${year}</span>
+        `;
+        
+        similarList.appendChild(li);
+    });
 }
 
 /**
- * Create a citation item element
+ * Display publication analysis results
  */
-function createCitationItem(citation) {
-    const item = document.createElement('div');
-    item.className = 'citation-item';
+function displayPublicationAnalysis(analysis) {
+    if (!analysis) return;
     
-    // Format publication date
-    const pubYear = citation.publication_date ? 
-        new Date(citation.publication_date).getFullYear() : 'N/A';
+    const analysisContainer = document.getElementById('analysis-container');
+    if (!analysisContainer) return;
     
-    item.innerHTML = `
-        <h3 class="citation-title">
-            <a href="publication.html?id=${citation.id}">${citation.title || 'Untitled Citation'}</a>
-        </h3>
-        <p class="citation-authors">${formatAuthors(citation.authors || [])}</p>
-        <p class="citation-source">
-            <span class="journal-name">${citation.journal || 'Unknown Source'}</span>, 
-            <span class="citation-year">${pubYear}</span>
-        </p>
-        <p class="citation-excerpt">
-            "${citation.excerpt || 'No excerpt available.'}"
-        </p>
+    // Prepare analysis sections
+    let topicsHtml = '';
+    if (analysis.primary_topics && analysis.primary_topics.length > 0) {
+        topicsHtml = `
+            <div class="analysis-section">
+                <h3>Primary Topics</h3>
+                <ul>
+                    ${analysis.primary_topics.map(topic => `<li>${topic}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    let findingsHtml = '';
+    if (analysis.key_findings && analysis.key_findings.length > 0) {
+        findingsHtml = `
+            <div class="analysis-section">
+                <h3>Key Findings</h3>
+                <ul>
+                    ${analysis.key_findings.map(finding => `<li>${finding}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    let methodologyHtml = '';
+    if (analysis.methodology && analysis.methodology.length > 0) {
+        methodologyHtml = `
+            <div class="analysis-section">
+                <h3>Methodology</h3>
+                <ul>
+                    ${analysis.methodology.map(method => `<li>${method}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    let applicationsHtml = '';
+    if (analysis.practical_applications && analysis.practical_applications.length > 0) {
+        applicationsHtml = `
+            <div class="analysis-section">
+                <h3>Practical Applications</h3>
+                <ul>
+                    ${analysis.practical_applications.map(app => `<li>${app}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    let gapsHtml = '';
+    if (analysis.knowledge_gaps && analysis.knowledge_gaps.length > 0) {
+        gapsHtml = `
+            <div class="analysis-section">
+                <h3>Knowledge Gaps & Future Research</h3>
+                <ul>
+                    ${analysis.knowledge_gaps.map(gap => `<li>${gap}</li>`).join('')}
+                </ul>
+            </div>
+        `;
+    }
+    
+    // Combine all sections into final HTML
+    analysisContainer.innerHTML = `
+        <h2>Publication Analysis</h2>
+        <div class="analysis-overview">
+            <div class="analysis-metric">
+                <span class="metric-label">Technical Complexity</span>
+                <span class="metric-value">${analysis.technical_complexity}/5</span>
+            </div>
+            <div class="analysis-metric">
+                <span class="metric-label">Temporal Context</span>
+                <span class="metric-value">${analysis.temporal_context}</span>
+            </div>
+        </div>
+        
+        ${topicsHtml}
+        ${findingsHtml}
+        ${methodologyHtml}
+        ${applicationsHtml}
+        ${gapsHtml}
+        
+        <div class="analysis-citation">
+            <h3>Citation Context</h3>
+            <p>${analysis.citation_context}</p>
+        </div>
     `;
-    
-    return item;
-}
-
-/**
- * Toggle between showing all citations and limited set
- */
-function toggleAllCitations(button) {
-    const citationsList = document.querySelector('.citations-list');
-    if (!citationsList || !citationsList.dataset.allCitations) return;
-    
-    const isExpanded = button.getAttribute('data-expanded') === 'true';
-    const allCitations = JSON.parse(citationsList.dataset.allCitations);
-    
-    if (isExpanded) {
-        // Show limited citations
-        citationsList.innerHTML = '';
-        
-        allCitations.slice(0, 3).forEach(citation => {
-            const citationItem = createCitationItem(citation);
-            citationsList.appendChild(citationItem);
-        });
-        
-        button.innerHTML = `See All Citations (${allCitations.length}) <i class="fas fa-chevron-down"></i>`;
-        button.setAttribute('data-expanded', 'false');
-    } else {
-        // Show all citations
-        citationsList.innerHTML = '';
-        
-        allCitations.forEach(citation => {
-            const citationItem = createCitationItem(citation);
-            citationsList.appendChild(citationItem);
-        });
-        
-        button.innerHTML = 'Show Less <i class="fas fa-chevron-up"></i>';
-        button.setAttribute('data-expanded', 'true');
-    }
-}
-
-/**
- * Setup tab switching functionality
- */
-function setupTabSwitching() {
-    const tabButtons = document.querySelectorAll('.tab-btn');
-    const tabContents = document.querySelectorAll('.tab-content');
-    
-    tabButtons.forEach(button => {
-        button.addEventListener('click', function() {
-            // Remove active class from all buttons and contents
-            tabButtons.forEach(btn => btn.classList.remove('active'));
-            tabContents.forEach(content => content.classList.remove('active'));
-            
-            // Add active class to clicked button and corresponding content
-            this.classList.add('active');
-            const tabName = this.getAttribute('data-tab');
-            document.getElementById(`${tabName}-tab`).classList.add('active');
-        });
-    });
-}
-
-/**
- * Setup citation sorting functionality
- */
-function setupCitationSorting() {
-    const sortSelect = document.getElementById('citation-sort');
-    if (!sortSelect) return;
-    
-    sortSelect.addEventListener('change', function() {
-        const sortOption = this.value;
-        
-        const citationsList = document.querySelector('.citations-list');
-        if (!citationsList || !citationsList.dataset.allCitations) return;
-        
-        const allCitations = JSON.parse(citationsList.dataset.allCitations);
-        let sortedCitations = [...allCitations];
-        
-        // Sort citations
-        if (sortOption === 'recent') {
-            sortedCitations.sort((a, b) => {
-                const dateA = a.publication_date ? new Date(a.publication_date) : new Date(0);
-                const dateB = b.publication_date ? new Date(b.publication_date) : new Date(0);
-                return dateB - dateA;
-            });
-        } else if (sortOption === 'influential') {
-            sortedCitations.sort((a, b) => (b.citations || 0) - (a.citations || 0));
-        }
-        
-        // Update the stored citations
-        citationsList.dataset.allCitations = JSON.stringify(sortedCitations);
-        
-        // Update the display
-        const seeMoreButton = document.querySelector('.see-more button');
-        const isExpanded = seeMoreButton ? 
-            seeMoreButton.getAttribute('data-expanded') === 'true' : false;
-        
-        citationsList.innerHTML = '';
-        
-        if (isExpanded) {
-            // Show all citations
-            sortedCitations.forEach(citation => {
-                const citationItem = createCitationItem(citation);
-                citationsList.appendChild(citationItem);
-            });
-        } else {
-            // Show limited citations
-            sortedCitations.slice(0, 3).forEach(citation => {
-                const citationItem = createCitationItem(citation);
-                citationsList.appendChild(citationItem);
-            });
-        }
-    });
 }
 
 /**
@@ -518,24 +359,19 @@ function setupCitationSorting() {
 function updateActionButtons(publication) {
     const viewFullTextBtn = document.getElementById('view-full-text');
     if (viewFullTextBtn) {
-        if (publication.full_text_url) {
-            viewFullTextBtn.href = publication.full_text_url;
+        if (publication.url) {
+            viewFullTextBtn.href = publication.url;
+            viewFullTextBtn.target = '_blank';
+        } else if (publication.doi) {
+            viewFullTextBtn.href = `https://doi.org/${publication.doi}`;
             viewFullTextBtn.target = '_blank';
         } else {
             viewFullTextBtn.addEventListener('click', function(e) {
                 e.preventDefault();
-                alert('Full text is not available for this publication.');
+                alert('Full text URL is not available for this publication.');
             });
             viewFullTextBtn.classList.add('btn-disabled');
         }
-    }
-    
-    const exportCitationBtn = document.getElementById('export-citation');
-    if (exportCitationBtn) {
-        exportCitationBtn.addEventListener('click', function(e) {
-            e.preventDefault();
-            exportCitation(publication);
-        });
     }
     
     const savePublicationBtn = document.getElementById('save-publication');
@@ -561,15 +397,35 @@ function updateActionButtons(publication) {
 }
 
 /**
- * Setup action buttons functionality
+ * Format authors for display
  */
-function setupActionButtons() {
-    // This setup happens in updateActionButtons to ensure 
-    // we have the publication data first
+function formatAuthors(authors) {
+    if (!authors || authors.length === 0) return 'Unknown Authors';
+    
+    if (authors.length <= 3) {
+        return authors.join(', ');
+    } else {
+        return `${authors.slice(0, 3).join(', ')} et al.`;
+    }
 }
 
 /**
- * Save publication to saved items
+ * Format number with comma separators
+ */
+function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * Format date in readable format
+ */
+function formatDate(dateString) {
+    const options = { year: 'numeric', month: 'long', day: 'numeric' };
+    return new Date(dateString).toLocaleDateString(undefined, options);
+}
+
+/**
+ * Save a publication to saved list
  */
 function savePublication(publication) {
     try {
@@ -587,7 +443,7 @@ function savePublication(publication) {
             title: publication.title,
             authors: publication.authors,
             journal: publication.journal,
-            year: publication.publication_date ? new Date(publication.publication_date).getFullYear() : null,
+            year: publication.publication_date ? new Date(publication.publication_date).getFullYear() : 'Unknown',
             saved_at: new Date().toISOString()
         });
         
@@ -599,162 +455,34 @@ function savePublication(publication) {
 }
 
 /**
- * Export citation in different formats
+ * Setup tab switching functionality
  */
-function exportCitation(publication) {
-    // Create modal for choosing citation format
-    const modal = document.createElement('div');
-    modal.className = 'citation-modal';
+function setupTabSwitching() {
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    const tabContents = document.querySelectorAll('.tab-content');
     
-    modal.innerHTML = `
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Export Citation</h3>
-                <button class="close-btn">&times;</button>
-            </div>
-            <div class="modal-body">
-                <p>Choose citation format:</p>
-                <div class="format-buttons">
-                    <button class="btn btn-outline format-btn" data-format="bibtex">BibTeX</button>
-                    <button class="btn btn-outline format-btn" data-format="apa">APA</button>
-                    <button class="btn btn-outline format-btn" data-format="mla">MLA</button>
-                    <button class="btn btn-outline format-btn" data-format="chicago">Chicago</button>
-                </div>
-                <div class="citation-output" style="display: none;">
-                    <textarea id="citation-text" rows="8" readonly></textarea>
-                    <button class="btn btn-primary copy-btn">
-                        <i class="fas fa-copy"></i> Copy to Clipboard
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-    
-    // Add modal to the document
-    document.body.appendChild(modal);
-    
-    // Setup close button
-    const closeBtn = modal.querySelector('.close-btn');
-    closeBtn.addEventListener('click', function() {
-        modal.remove();
-    });
-    
-    // Setup format buttons
-    const formatButtons = modal.querySelectorAll('.format-btn');
-    formatButtons.forEach(button => {
+    tabButtons.forEach(button => {
         button.addEventListener('click', function() {
-            const format = this.getAttribute('data-format');
-            const citationText = formatCitation(publication, format);
+            // Remove active class from all buttons and contents
+            tabButtons.forEach(btn => btn.classList.remove('active'));
+            tabContents.forEach(content => content.classList.remove('active'));
             
-            const outputDiv = modal.querySelector('.citation-output');
-            const textArea = modal.querySelector('#citation-text');
-            
-            textArea.value = citationText;
-            outputDiv.style.display = 'block';
-            
-            // Highlight the selected format button
-            formatButtons.forEach(btn => btn.classList.remove('selected'));
-            this.classList.add('selected');
+            // Add active class to clicked button and corresponding content
+            this.classList.add('active');
+            const tabName = this.getAttribute('data-tab');
+            document.getElementById(`${tabName}-tab`).classList.add('active');
         });
     });
-    
-    // Setup copy button
-    const copyBtn = modal.querySelector('.copy-btn');
-    copyBtn.addEventListener('click', function() {
-        const textArea = modal.querySelector('#citation-text');
-        textArea.select();
-        document.execCommand('copy');
-        
-        this.innerHTML = '<i class="fas fa-check"></i> Copied!';
-        setTimeout(() => {
-            this.innerHTML = '<i class="fas fa-copy"></i> Copy to Clipboard';
-        }, 2000);
-    });
-    
-    // Close modal when clicking outside
-    modal.addEventListener('click', function(e) {
-        if (e.target === modal) {
-            modal.remove();
-        }
-    });
-}
-
-/**
- * Format citation based on selected format
- */
-function formatCitation(publication, format) {
-    const authors = publication.authors || ['Unknown Author'];
-    const title = publication.title || 'Untitled Publication';
-    const journal = publication.journal || '';
-    const year = publication.publication_date ? new Date(publication.publication_date).getFullYear() : '';
-    const volume = publication.volume || '';
-    const issue = publication.issue || '';
-    const pages = publication.pages || '';
-    const doi = publication.doi || '';
-    
-    switch (format) {
-        case 'bibtex':
-            // Generate author string for BibTeX
-            const bibtexAuthors = authors.map(author => {
-                const nameParts = author.split(', ');
-                if (nameParts.length === 2) {
-                    return `${nameParts[0]}, ${nameParts[1]}`;
-                }
-                return author;
-            }).join(' and ');
-            
-            // Create BibTeX ID based on first author's last name and year
-            const firstAuthorLastName = authors[0].split(' ').pop().replace(/[^a-zA-Z]/g, '');
-            const bibtexId = `${firstAuthorLastName}${year}`;
-            
-            return `@article{${bibtexId},
-  author = {${bibtexAuthors}},
-  title = {${title}},
-  journal = {${journal}},
-  year = {${year}}${volume ? `,
-  volume = {${volume}}` : ''}${issue ? `,
-  number = {${issue}}` : ''}${pages ? `,
-  pages = {${pages}}` : ''}${doi ? `,
-  doi = {${doi}}` : ''}
-}`;
-            
-        case 'apa':
-            // APA style: Author(s). (Year). Title. Journal, Volume(Issue), Pages. DOI
-            const apaAuthors = authors.map(author => {
-                const nameParts = author.split(' ');
-                if (nameParts.length > 1) {
-                    const lastName = nameParts.pop();
-                    const initials = nameParts.map(n => `${n.charAt(0)}.`).join(' ');
-                    return `${lastName}, ${initials}`;
-                }
-                return author;
-            }).join(', ');
-            
-            return `${apaAuthors} (${year}). ${title}. ${journal}${volume ? `, ${volume}` : ''}${issue ? `(${issue})` : ''}${pages ? `, ${pages}` : ''}${doi ? `. https://doi.org/${doi}` : ''}`;
-            
-        case 'mla':
-            // MLA style: Author(s). "Title." Journal, vol. Volume, no. Issue, Year, pp. Pages. DOI
-            const mlaAuthors = authors.join(', ');
-            
-            return `${mlaAuthors}. "${title}." ${journal}${volume ? `, vol. ${volume}` : ''}${issue ? `, no. ${issue}` : ''}, ${year}${pages ? `, pp. ${pages}` : ''}${doi ? `. DOI: ${doi}` : ''}`;
-            
-        case 'chicago':
-            // Chicago style: Author(s). "Title." Journal Volume, no. Issue (Year): Pages. DOI
-            const chicagoAuthors = authors.join(', ');
-            
-            return `${chicagoAuthors}. "${title}." ${journal} ${volume}${issue ? `, no. ${issue}` : ''} (${year})${pages ? `: ${pages}` : ''}${doi ? `. https://doi.org/${doi}` : ''}`;
-            
-        default:
-            return 'Citation format not supported.';
-    }
 }
 
 /**
  * Display error message
  */
-function displayErrorMessage(message) {
+function displayError(message) {
     const mainContent = document.querySelector('main');
     if (!mainContent) return;
+    
+    console.error("Displaying error:", message);
     
     const errorElement = document.createElement('div');
     errorElement.className = 'error-container';
@@ -769,7 +497,7 @@ function displayErrorMessage(message) {
         </div>
     `;
     
-    // Remove existing content
+    // Clear existing content and show error
     mainContent.innerHTML = '';
     mainContent.appendChild(errorElement);
     

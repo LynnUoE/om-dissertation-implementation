@@ -81,7 +81,7 @@ class LiteratureSearcher:
         min_citations: Optional[int] = None,
         publication_types: Optional[List[str]] = None,
         open_access_only: bool = False,
-        analyze_results: bool = True,
+        analyze_results: bool = False,  # Default is False
         min_relevance: float = 0.5
     ) -> Dict:
         """
@@ -95,7 +95,7 @@ class LiteratureSearcher:
             min_citations: Minimum citation count
             publication_types: Types of publications to include
             open_access_only: Whether to return only open access publications
-            analyze_results: Whether to perform research analysis on results
+            analyze_results: Whether to perform research analysis on results (now False by default)
             min_relevance: Minimum relevance score for analyzed results
             
         Returns:
@@ -104,7 +104,7 @@ class LiteratureSearcher:
         try:
             # Check cache first
             cache_key = self._generate_cache_key(query, max_results, from_year, to_year, 
-                                              min_citations, publication_types, open_access_only)
+                                            min_citations, publication_types, open_access_only)
             cached_result = self._get_from_cache(cache_key)
             if cached_result:
                 self.logger.info(f"Returning cached results for query: {query[:50]}...")
@@ -119,7 +119,7 @@ class LiteratureSearcher:
             
             self.logger.info(f"Query processing completed in {query_processing_time:.2f}s")
             self.logger.info(f"Extracted {len(structured_query.get('research_areas', []))} research areas " +
-                           f"and {len(structured_query.get('expertise', []))} expertise areas")
+                        f"and {len(structured_query.get('expertise', []))} expertise areas")
             
             # If we have no search terms, return empty results
             if (not structured_query.get('research_areas') and 
@@ -195,59 +195,8 @@ class LiteratureSearcher:
             literature_results.sort(key=lambda x: (x.relevance_score, x.citations), reverse=True)
             limited_results = literature_results[:max_results]
             
-            # Perform research analysis if requested
+            # Set empty analysis results - NEVER perform analysis during search
             analysis_results = None
-            synthesis = None
-            methodology_analysis = None
-            literature_summary = None
-            
-            if analyze_results and limited_results:
-                analysis_start_time = datetime.now()
-                
-                # Convert to dictionary format for analyzer
-                publications_for_analysis = [result.to_dict() for result in limited_results]
-                
-                # Analyze publications
-                analyzed_publications = self.research_analyzer.analyze_publications(
-                    publications=publications_for_analysis,
-                    query_context=structured_query,
-                    min_relevance=min_relevance,
-                    max_publications=max_results
-                )
-                
-                # Perform synthesis if we have enough analyzed publications
-                if len(analyzed_publications) >= 2:
-                    synthesis = self.research_analyzer.synthesize_analyses(
-                        analyzed_results=analyzed_publications,
-                        original_query=query
-                    )
-                    
-                    methodology_analysis = self.research_analyzer.analyze_methodologies(
-                        analyzed_results=analyzed_publications
-                    )
-                    
-                    literature_summary = self.research_analyzer.generate_literature_summary(
-                        analyzed_results=analyzed_publications,
-                        synthesis=synthesis,
-                        original_query=query
-                    )
-                
-                # Add analysis to search results
-                for result in limited_results:
-                    for analyzed_pub in analyzed_publications:
-                        if analyzed_pub['publication']['id'] == result.id:
-                            result.analysis = analyzed_pub['analysis']
-                            break
-                
-                analysis_time = (datetime.now() - analysis_start_time).total_seconds()
-                self.logger.info(f"Research analysis completed in {analysis_time:.2f}s")
-                
-                analysis_results = {
-                    'analyzed_publications': analyzed_publications,
-                    'synthesis': synthesis,
-                    'methodology_analysis': methodology_analysis,
-                    'literature_summary': literature_summary
-                }
             
             # Prepare result
             total_processing_time = (datetime.now() - query_start_time).total_seconds()
@@ -264,10 +213,6 @@ class LiteratureSearcher:
                     'processing_time': total_processing_time
                 }
             }
-            
-            # Add analysis results if available
-            if analysis_results:
-                result['analysis'] = analysis_results
             
             # Cache result
             self._add_to_cache(cache_key, result)
@@ -287,6 +232,76 @@ class LiteratureSearcher:
                 }
             }
     
+    def analyze_single_publication(self, publication_id: str, query_context: Optional[Dict] = None) -> Dict:
+        """
+        Analyze a single publication in detail
+        
+        Args:
+            publication_id: Identifier for the publication
+            query_context: Optional context from the original query
+            
+        Returns:
+            Dictionary with analysis results
+        """
+        try:
+            self.logger.info(f"Analyzing publication {publication_id}")
+            
+            # First get the publication details
+            publication_result = self.get_publication_details(publication_id)
+            
+            if publication_result['status'] != 'success':
+                return {
+                    'status': 'error',
+                    'message': f'Could not retrieve publication details: {publication_result.get("message", "Unknown error")}',
+                    'publication_id': publication_id
+                }
+            
+            publication = publication_result['publication']
+            
+            # Use provided query context or create empty one
+            if not query_context:
+                query_context = {'research_areas': [], 'expertise': []}
+            
+            # Analyze the publication
+            analysis = self.research_analyzer.analyze_publication(
+                publication=publication,
+                query_context=query_context
+            )
+            
+            if not analysis:
+                return {
+                    'status': 'error',
+                    'message': 'Failed to analyze publication',
+                    'publication_id': publication_id
+                }
+            
+            # Convert analysis to dictionary
+            analysis_dict = {
+                'primary_topics': analysis.primary_topics,
+                'key_findings': analysis.key_findings,
+                'methodology': analysis.methodology,
+                'practical_applications': analysis.practical_applications,
+                'technical_complexity': analysis.technical_complexity,
+                'citation_context': analysis.citation_context,
+                'knowledge_gaps': analysis.knowledge_gaps,
+                'temporal_context': analysis.temporal_context,
+                'timestamp': analysis.timestamp
+            }
+            
+            return {
+                'status': 'success',
+                'publication_id': publication_id,
+                'analysis': analysis_dict
+            }
+            
+        except Exception as e:
+            self.logger.error(f"Error analyzing single publication: {str(e)}", exc_info=True)
+            return {
+                'status': 'error',
+                'message': f'Error analyzing publication: {str(e)}',
+                'publication_id': publication_id
+            }
+    
     def advanced_search(
         self,
         research_areas: List[str],
@@ -295,7 +310,7 @@ class LiteratureSearcher:
         max_results: int = 10,
         from_year: Optional[int] = None,
         to_year: Optional[int] = None,
-        analyze_results: bool = True
+        analyze_results: bool = False  # Changed default to False
     ) -> Dict:
         """
         Perform an advanced search with explicit parameters instead of natural language query
@@ -346,67 +361,97 @@ class LiteratureSearcher:
         
         Args:
             publication_id: Identifier for the publication
-            
+                
         Returns:
             Dictionary with publication details
         """
         try:
             self.logger.info(f"Getting detailed information for publication {publication_id}")
             
-            # If the ID doesn't have a proper prefix, check different formats
-            if not (publication_id.startswith('W') or publication_id.startswith('https://openalex.org/')):
-                # Try different possible formats
-                possible_ids = [
-                    publication_id,
-                    f"W{publication_id}",
-                    f"https://openalex.org/{publication_id}",
-                    f"https://openalex.org/W{publication_id}"
-                ]
+            # Handle DOI URLs by extracting the DOI
+            if publication_id.startswith("https://doi.org/"):
+                doi = publication_id.replace("https://doi.org/", "")
+                self.logger.info(f"Extracted DOI from URL: {doi}")
                 
-                for possible_id in possible_ids:
-                    response = self.openalex_client._make_request(f"works/{possible_id}")
-                    if not response.error:
-                        publication_id = possible_id
-                        break
+                # Search for publications with this DOI using the existing method
+                response = self.openalex_client.search_works(
+                    query=f'',  # Empty query
+                    filter_string=f'doi:{doi}'  # Use filter instead for exact DOI match
+                )
+                
+                if response.error:
+                    self.logger.error(f"OpenAlex API error: {response.error}")
+                    return {
+                        'status': 'error',
+                        'message': f'Error retrieving publication by DOI: {response.error}',
+                        'publication_id': publication_id
+                    }
+                
+                work_results = response.get_works()
+                if not work_results or len(work_results) == 0:
+                    return {
+                        'status': 'error',
+                        'message': f'No publication found with DOI: {doi}',
+                        'publication_id': publication_id
+                    }
+                
+                # Use DOI as the identifier since WorkResult doesn't have an id attribute
+                # We'll continue with the original DOI URL
+                self.logger.info(f"Found work with DOI: {doi}")
             
-            # Get publication data
-            response = self.openalex_client._make_request(f"works/{publication_id}")
-            
-            if response.error:
-                self.logger.error(f"OpenAlex API error: {response.error}")
-                return {
-                    'status': 'error',
-                    'message': f'Error retrieving publication details: {response.error}',
-                    'publication_id': publication_id
-                }
-            
-            # Extract publication data from response
-            publication_data = response.data
-            
-            # Process publication data into a structured format
-            publication = self._process_publication_data(publication_data)
-            
-            # Analyze the publication
-            analysis = self.research_analyzer.analyze_publication(
-                publication=publication.to_dict(),
-                query_context={'research_areas': [], 'expertise': []}  # No specific query context
-            )
-            
-            if analysis:
-                analysis_dict = {
-                    'primary_topics': analysis.primary_topics,
-                    'key_findings': analysis.key_findings,
-                    'methodology': analysis.methodology,
-                    'practical_applications': analysis.practical_applications,
-                    'technical_complexity': analysis.technical_complexity,
-                    'citation_context': analysis.citation_context,
-                    'knowledge_gaps': analysis.knowledge_gaps,
-                    'temporal_context': analysis.temporal_context
-                }
-                publication.analysis = analysis_dict
-            
-            # Get related publications
-            related_publications = self._get_related_publications(publication_data, max_related=3)
+            # Make a direct request for the publication details using the ID/DOI
+            # If it's a DOI URL, use it directly in the OpenAlex API request
+            if publication_id.startswith("https://doi.org/"):
+                # Format a request using the DOI filter
+                doi = publication_id.replace("https://doi.org/", "")
+                response = self.openalex_client.search_works(
+                    query="",
+                    filter_string=f'doi:{doi}',
+                    per_page=1
+                )
+                
+                if response.error:
+                    self.logger.error(f"OpenAlex API error: {response.error}")
+                    return {
+                        'status': 'error',
+                        'message': f'Error retrieving publication details by DOI: {response.error}',
+                        'publication_id': publication_id
+                    }
+                
+                work_results = response.get_works()
+                if not work_results or len(work_results) == 0:
+                    return {
+                        'status': 'error',
+                        'message': f'No publication found with DOI: {doi}',
+                        'publication_id': publication_id
+                    }
+                
+                # Use the first result as the publication data
+                work = work_results[0]
+                publication = self._create_publication_from_work(work)
+                
+                # Since we have a limited work result, we can't get related publications
+                related_publications = []
+            else:
+                # For non-DOI identifiers, continue with the standard approach
+                response = self.openalex_client._make_request(f"works/{publication_id}")
+                
+                if response.error:
+                    self.logger.error(f"OpenAlex API error: {response.error}")
+                    return {
+                        'status': 'error',
+                        'message': f'Error retrieving publication details: {response.error}',
+                        'publication_id': publication_id
+                    }
+                
+                # Extract publication data from response
+                publication_data = response.data
+                
+                # Process publication data into a structured format
+                publication = self._process_publication_data(publication_data)
+                
+                # Get related publications
+                related_publications = self._get_related_publications(publication_data, max_related=3)
             
             return {
                 'status': 'success',
@@ -422,13 +467,46 @@ class LiteratureSearcher:
                 'publication_id': publication_id
             }
     
+    def _create_publication_from_work(self, work: Any) -> LiteratureSearchResult:
+        """
+        Create a LiteratureSearchResult from a work object returned by search
+        
+        Args:
+            work: Work result from search
+            
+        Returns:
+            LiteratureSearchResult object
+        """
+        # Generate topic matches and relevance score
+        topic_matches = {}  # We don't have topic matches for this basic case
+        
+        # Create result with available fields from the WorkResult
+        result = LiteratureSearchResult(
+            id=work.doi if work.doi else f"W{hash(work.title) & 0xffffffff}",
+            title=work.title,
+            authors=work.authors,
+            publication_date=work.publication_date,
+            journal=None,  # This would come from work metadata in a real implementation
+            abstract=work.abstract,
+            doi=work.doi,
+            citations=work.citations,
+            open_access=bool(work.doi),  # Simplified check
+            type=self._determine_publication_type(work),
+            topic_matches=topic_matches,
+            relevance_score=1.0,  # Default for direct lookups
+            url=f"https://doi.org/{work.doi}" if work.doi else None
+        )
+        
+        return result
+    
     def interdisciplinary_search(
         self,
         primary_discipline: str,
         secondary_disciplines: List[str],
         max_results: int = 10,
         from_year: Optional[int] = None,
-        recent_years: int = 5
+        recent_years: int = 5,
+        analyze_results: bool = False  # Added parameter with default False
     ) -> Dict:
         """
         Perform a specialized interdisciplinary search
@@ -439,6 +517,7 @@ class LiteratureSearcher:
             max_results: Maximum number of results to return
             from_year: Earliest publication year to include
             recent_years: Number of recent years to include if from_year not specified
+            analyze_results: Whether to analyze the results
             
         Returns:
             Dictionary containing search results and metadata
@@ -575,8 +654,10 @@ class LiteratureSearcher:
             literature_results.sort(key=lambda x: x.relevance_score, reverse=True)
             limited_results = literature_results[:max_results]
             
-            # Perform specialized analysis
-            if limited_results:
+            # Only perform specialized analysis if requested
+            interdisciplinary_synthesis = None
+            
+            if analyze_results and limited_results:
                 publications_for_analysis = [result.to_dict() for result in limited_results]
                 
                 analyzed_publications = self.research_analyzer.analyze_publications(
@@ -601,27 +682,22 @@ class LiteratureSearcher:
                         analyzed_publications=analyzed_publications,
                         intersection_data=intersection_data
                     )
-                else:
-                    interdisciplinary_synthesis = None
-                
-                return {
-                    'status': 'success',
-                    'primary_discipline': primary_discipline,
-                    'secondary_disciplines': secondary_disciplines,
-                    'interdisciplinary_analysis': intersection_data,
-                    'results': [result.to_dict() for result in limited_results],
-                    'interdisciplinary_synthesis': interdisciplinary_synthesis,
-                    'query': combined_query
-                }
-            else:
-                return {
-                    'status': 'success',
-                    'primary_discipline': primary_discipline,
-                    'secondary_disciplines': secondary_disciplines,
-                    'interdisciplinary_analysis': intersection_data,
-                    'results': [],
-                    'query': combined_query
-                }
+            
+            # Create result dictionary
+            result = {
+                'status': 'success',
+                'primary_discipline': primary_discipline,
+                'secondary_disciplines': secondary_disciplines,
+                'interdisciplinary_analysis': intersection_data,
+                'results': [result.to_dict() for result in limited_results],
+                'query': combined_query
+            }
+            
+            # Add synthesis only if analysis was performed
+            if interdisciplinary_synthesis:
+                result['interdisciplinary_synthesis'] = interdisciplinary_synthesis
+            
+            return result
             
         except Exception as e:
             self.logger.error(f"Error in interdisciplinary search: {str(e)}", exc_info=True)
@@ -631,6 +707,8 @@ class LiteratureSearcher:
                 'primary_discipline': primary_discipline,
                 'secondary_disciplines': secondary_disciplines
             }
+
+    # The rest of the class methods remain unchanged...
     
     def _process_work_results(
         self,

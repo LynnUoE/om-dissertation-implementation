@@ -4,7 +4,7 @@
  */
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log("Result handler initialized");
+    console.log("Results handler initialized");
     
     // Check if we're on the results page
     const publicationsContainer = document.getElementById('publications-container');
@@ -72,19 +72,6 @@ async function initializeResultsPage() {
         } else {
             console.log('No publication results to display');
             displayNoResults();
-        }
-        
-        // Display analysis if available
-        if (searchResults.analysis) {
-            console.log('Displaying analysis');
-            displayAnalysis(searchResults.analysis);
-        }
-        
-        // Display interdisciplinary analysis if available
-        const isInterdisciplinary = sessionStorage.getItem('is_interdisciplinary') === 'true';
-        if (isInterdisciplinary && searchResults.interdisciplinary_analysis) {
-            console.log('Displaying interdisciplinary analysis');
-            displayInterdisciplinaryAnalysis(searchResults.interdisciplinary_analysis, searchResults.interdisciplinary_synthesis);
         }
         
         // Set up Modify Search button
@@ -177,37 +164,21 @@ function displayPublicationResults(publications) {
 }
 
 /**
- * Create a publication card element
+ * Create a publication card element with optimized display
  */
 function createPublicationCard(publication) {
     const card = document.createElement('div');
     card.className = 'publication-card';
     
-    // Get top topic match for display
-    let topTopic = ['No matching topic', 0];
-    if (publication.topic_matches && Object.keys(publication.topic_matches).length > 0) {
-        topTopic = Object.entries(publication.topic_matches)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 1)[0];
-    }
-    
     // Format publication date
-    let pubDate = 'N/A';
+    let pubYear = 'N/A';
     if (publication.publication_date) {
         try {
-            pubDate = new Date(publication.publication_date).getFullYear();
+            pubYear = new Date(publication.publication_date).getFullYear();
         } catch (e) {
             console.warn('Error formatting date:', e);
-            pubDate = publication.publication_date;
+            pubYear = publication.publication_date;
         }
-    }
-    
-    // Truncate abstract
-    let abstract = 'No abstract available.';
-    if (publication.abstract) {
-        abstract = publication.abstract.length > 250 ? 
-            publication.abstract.substring(0, 250) + '...' : 
-            publication.abstract;
     }
     
     // Determine publication type icon and label
@@ -237,36 +208,55 @@ function createPublicationCard(publication) {
             break;
     }
     
-    const topicPercentage = Math.round((topTopic[1] || 0) * 100);
+    // Extract keywords from topic matches
+    let keywords = [];
+    if (publication.topic_matches && Object.keys(publication.topic_matches).length > 0) {
+        keywords = Object.keys(publication.topic_matches).slice(0, 5); // Limit to top 5 keywords
+    }
+    
+    // Get organization from authors if available
+    let organization = '';
+    if (publication.authors && publication.authors.length > 0 && publication.author_institutions) {
+        const firstAuthor = publication.authors[0];
+        organization = publication.author_institutions[firstAuthor] || '';
+    }
     
     card.innerHTML = `
         <div class="publication-info">
             <h3 class="publication-title">${publication.title || 'Untitled Publication'}</h3>
-            <p class="publication-authors">${formatAuthors(publication.authors || [])}</p>
-            <p class="publication-source">
-                <span class="journal-name">${publication.journal || 'Unknown Source'}</span>, 
-                <span class="publication-year">${pubDate}</span>
-            </p>
-            <div class="publication-metrics">
-                <span><i class="fas fa-quote-right"></i> ${formatNumber(publication.citations || 0)} Citations</span>
-                <span><i class="${pubTypeIcon}"></i> ${pubTypeLabel}</span>
-                ${publication.open_access ? '<span><i class="fas fa-unlock"></i> Open Access</span>' : ''}
-            </div>
-            <div class="publication-abstract">
-                <p>${abstract}</p>
-            </div>
-            <div class="relevance-match">
-                <h4>Topic Match:</h4>
-                <div class="match-bars">
-                    <div class="match-item">
-                        <span>${topTopic[0]}</span>
-                        <div class="progress-bar">
-                            <div class="progress" style="width: ${topicPercentage}%"></div>
-                        </div>
-                        <span>${topicPercentage}%</span>
-                    </div>
+            
+            <div class="publication-metadata">
+                <div class="metadata-row">
+                    <span class="metadata-label">Authors:</span>
+                    <span class="metadata-value">${formatAuthors(publication.authors || [])}</span>
+                </div>
+                
+                ${organization ? `
+                <div class="metadata-row">
+                    <span class="metadata-label">Organization:</span>
+                    <span class="metadata-value">${organization}</span>
+                </div>` : ''}
+                
+                <div class="metadata-row">
+                    <span class="metadata-label">Source:</span>
+                    <span class="metadata-value journal-name">${publication.journal || 'Unknown Source'}</span>
+                </div>
+                
+                <div class="publication-metrics">
+                    <span><i class="fas fa-calendar-alt"></i> ${pubYear}</span>
+                    <span><i class="fas fa-quote-right"></i> ${formatNumber(publication.citations || 0)} Citations</span>
+                    <span><i class="${pubTypeIcon}"></i> ${pubTypeLabel}</span>
+                    ${publication.open_access ? '<span><i class="fas fa-unlock"></i> Open Access</span>' : ''}
                 </div>
             </div>
+            
+            ${keywords.length > 0 ? `
+            <div class="publication-keywords">
+                <span class="keywords-label">Keywords:</span>
+                <div class="keywords-list">
+                    ${keywords.map(keyword => `<span class="keyword">${keyword}</span>`).join('')}
+                </div>
+            </div>` : ''}
         </div>
         <div class="publication-actions">
             <a href="publication.html?id=${publication.id}" class="btn btn-primary">View Details</a>
@@ -278,11 +268,13 @@ function createPublicationCard(publication) {
     
     // Add event listener for save button
     const saveButton = card.querySelector('.save-publication');
-    saveButton.addEventListener('click', function() {
-        savePublication(publication);
-        this.innerHTML = '<i class="fas fa-check"></i> Saved';
-        this.disabled = true;
-    });
+    if (saveButton) {
+        saveButton.addEventListener('click', function() {
+            savePublication(publication);
+            this.innerHTML = '<i class="fas fa-check"></i> Saved';
+            this.disabled = true;
+        });
+    }
     
     return card;
 }

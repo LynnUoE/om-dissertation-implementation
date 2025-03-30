@@ -195,16 +195,25 @@ class OpenAlexClient:
         page: int = 1,
         per_page: int = 25,
         sort: Optional[str] = None,
-        min_citations: Optional[int] = None
+        min_citations: Optional[int] = None,
+        filter_string: Optional[str] = None
     ) -> OpenAlexResponse:
         """Search for works in OpenAlex."""
         params = {
-            'search': query,
             'page': page,
             'per-page': min(per_page, 200)
         }
         
+        # Add search query if provided
+        if query:
+            params['search'] = query
+        
+        # Build filter parts
         filter_parts = []
+        
+        # Add direct filter string if provided
+        if filter_string:
+            filter_parts.append(filter_string)
         
         if from_year is not None or to_year is not None:
             year_range = f"{from_year or ''}-{to_year or ''}"
@@ -220,6 +229,44 @@ class OpenAlexClient:
             params['sort'] = sort
         
         return self._make_request('works', params)
+
+    def search_works_by_doi(self, doi: str) -> OpenAlexResponse:
+        """
+        Search for works by DOI
+        
+        Args:
+            doi: Digital Object Identifier
+            
+        Returns:
+            OpenAlex API response
+        """
+        # URL encode the DOI to handle special characters
+        encoded_doi = quote(doi)
+        params = {
+            'filter': f'doi:{encoded_doi}',
+            'per-page': 1  # We only need the first match
+        }
+        
+        return self._make_request('works', params)
+
+    def get_work(self, work_id: str) -> OpenAlexResponse:
+        """
+        Get details for a specific work by ID
+        
+        Args:
+            work_id: OpenAlex work identifier
+            
+        Returns:
+            OpenAlex API response
+        """
+        # Make sure the work_id is properly formatted
+        if not work_id.startswith('W') and not work_id.startswith('https://openalex.org/W'):
+            if work_id.startswith('https://openalex.org/'):
+                work_id = work_id.replace('https://openalex.org/', '')
+            else:
+                work_id = f"W{work_id}"
+        
+        return self._make_request(f'works/{work_id}')
 
 def create_client(email: str) -> OpenAlexClient:
     """Factory function to create an OpenAlexClient instance."""
