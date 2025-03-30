@@ -1,17 +1,145 @@
 /**
- * ResearchMatch - Main JavaScript
+ * LitFinder - Main JavaScript
  * Global functionality shared across all pages
  */
 
+// Define loading indicator functions immediately to ensure they're available
+window.showLoading = function(message) {
+    console.log('Loading started:', message || 'Processing request...');
+    
+    // Create a loading overlay if it doesn't exist
+    let loadingOverlay = document.getElementById('loading-overlay');
+    if (!loadingOverlay) {
+        loadingOverlay = document.createElement('div');
+        loadingOverlay.id = 'loading-overlay';
+        loadingOverlay.className = 'loading-overlay';
+        loadingOverlay.innerHTML = `
+            <div class="spinner"></div>
+            <p>${message || 'Processing your request...'}</p>
+        `;
+        
+        // Add styles if not already in CSS
+        if (!document.querySelector('style#loading-styles')) {
+            const style = document.createElement('style');
+            style.id = 'loading-styles';
+            style.textContent = `
+                .loading-overlay {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    right: 0;
+                    bottom: 0;
+                    background-color: rgba(0, 0, 0, 0.7);
+                    display: flex;
+                    flex-direction: column;
+                    justify-content: center;
+                    align-items: center;
+                    z-index: 9999;
+                    color: white;
+                }
+                .spinner {
+                    width: 50px;
+                    height: 50px;
+                    border: 5px solid rgba(255, 255, 255, 0.3);
+                    border-top-color: white;
+                    border-radius: 50%;
+                    animation: spin 1s linear infinite;
+                    margin-bottom: 15px;
+                }
+                @keyframes spin {
+                    to { transform: rotate(360deg); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+        
+        document.body.appendChild(loadingOverlay);
+    } else {
+        loadingOverlay.style.display = 'flex';
+        const messageElement = loadingOverlay.querySelector('p');
+        if (messageElement && message) {
+            messageElement.textContent = message;
+        }
+    }
+};
+
+window.hideLoading = function() {
+    console.log('Loading finished');
+    const loadingOverlay = document.getElementById('loading-overlay');
+    if (loadingOverlay) {
+        loadingOverlay.style.display = 'none';
+    }
+};
+
 document.addEventListener('DOMContentLoaded', function() {
+    // Check if elements exist before initializing
+    const tagsInputContainers = document.querySelectorAll('.tags-input');
+    if (tagsInputContainers && tagsInputContainers.length > 0) {
+        initializeTagsInput();
+    } else {
+        console.log("No tags input containers found on this page");
+    }
+    
+    // Initialize other UI components with similar checks
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    if (tabButtons && tabButtons.length > 0) {
+        initializeTabsSystem();
+    }
+    
+    const forms = document.querySelectorAll('form');
+    if (forms && forms.length > 0) {
+        setupFormValidation();
+    }
     // Initialize common UI elements
     initializeTagsInput();
     initializeTabsSystem();
     setupFormValidation();
     
-    // Setup loading indicator for API calls
-    setupLoadingIndicator();
+    // Check API health on startup
+    checkApiHealth();
+    
+    // Load saved publications if on saved publications page
+    if (document.getElementById('saved-publications-container')) {
+        loadSavedPublications();
+    }
 });
+
+/**
+ * Check API health to ensure backend is reachable
+ */
+async function checkApiHealth() {
+    try {
+        // Only check health on the home page
+        if (!document.getElementById('research-query-form')) {
+            return;
+        }
+        
+        const healthStatus = await ApiService.checkHealth();
+        
+        if (healthStatus.status !== 'healthy') {
+            showApiWarning();
+        }
+    } catch (error) {
+        console.error('API Health check failed:', error);
+        showApiWarning();
+    }
+}
+
+/**
+ * Show API warning message if backend is unreachable
+ */
+function showApiWarning() {
+    const warningContainer = document.createElement('div');
+    warningContainer.className = 'api-warning';
+    warningContainer.innerHTML = `
+        <div class="warning-content">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>Warning: Could not connect to the search backend. Some features may be unavailable.</span>
+        </div>
+    `;
+    
+    document.body.insertBefore(warningContainer, document.body.firstChild);
+}
 
 /**
  * Tags Input Component
@@ -204,63 +332,148 @@ function showValidationMessage(form) {
  * Loading indicator for API calls
  */
 function setupLoadingIndicator() {
-    window.showLoading = function() {
-        const overlay = document.getElementById('loading-overlay');
-        if (overlay) {
-            overlay.classList.remove('hidden');
+    // Create loading overlay if it doesn't exist
+    let loadingOverlay = document.getElementById('loading-overlay');
+    
+    if (!loadingOverlay) {
+        loadingOverlay = document.createElement('div');
+        loadingOverlay.id = 'loading-overlay';
+        loadingOverlay.className = 'hidden';
+        loadingOverlay.innerHTML = `
+            <div class="spinner"></div>
+            <p>Processing your request...</p>
+        `;
+        document.body.appendChild(loadingOverlay);
+    }
+    
+    window.showLoading = function(message) {
+        if (message) {
+            const messageElement = loadingOverlay.querySelector('p');
+            if (messageElement) {
+                messageElement.textContent = message;
+            }
         }
+        loadingOverlay.classList.remove('hidden');
     };
     
     window.hideLoading = function() {
-        const overlay = document.getElementById('loading-overlay');
-        if (overlay) {
-            overlay.classList.add('hidden');
+        loadingOverlay.classList.add('hidden');
+        // Reset default message
+        const messageElement = loadingOverlay.querySelector('p');
+        if (messageElement) {
+            messageElement.textContent = 'Processing your request...';
         }
     };
 }
 
 /**
- * Utility function for API calls
+ * Load and display saved publications
  */
-async function apiCall(endpoint, method = 'GET', data = null) {
-    const apiBaseUrl = '/api'; // Base URL for API endpoints
-    const url = `${apiBaseUrl}${endpoint}`;
+function loadSavedPublications() {
+    const container = document.getElementById('saved-publications-container');
+    if (!container) return;
     
-    const options = {
-        method,
-        headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-        }
-    };
+    // Get saved publications from localStorage
+    const savedJson = localStorage.getItem('saved_publications');
+    const savedPublications = savedJson ? JSON.parse(savedJson) : [];
     
-    if (data && (method === 'POST' || method === 'PUT')) {
-        options.body = JSON.stringify(data);
+    if (savedPublications.length === 0) {
+        container.innerHTML = `
+            <div class="no-saved-items">
+                <i class="fas fa-bookmark"></i>
+                <h3>No Saved Publications</h3>
+                <p>Publications you save will appear here for easy reference.</p>
+                <a href="index.html" class="btn btn-primary">Search for Publications</a>
+            </div>
+        `;
+        return;
     }
     
-    try {
-        window.showLoading();
-        const response = await fetch(url, options);
+    // Sort by date saved (most recent first)
+    savedPublications.sort((a, b) => {
+        const dateA = new Date(a.saved_at);
+        const dateB = new Date(b.saved_at);
+        return dateB - dateA;
+    });
+    
+    // Create list of saved publications
+    const savedList = document.createElement('div');
+    savedList.className = 'saved-publications-list';
+    
+    savedPublications.forEach(publication => {
+        const item = document.createElement('div');
+        item.className = 'saved-publication-item';
         
-        if (!response.ok) {
-            throw new Error(`API error: ${response.status}`);
+        item.innerHTML = `
+            <div class="publication-info">
+                <h3 class="publication-title">${publication.title}</h3>
+                <p class="publication-authors">${publication.authors.join(', ')}</p>
+                <p class="publication-source">
+                    <span class="journal-name">${publication.journal || 'Unknown Source'}</span>, 
+                    <span class="publication-year">${publication.year}</span>
+                </p>
+                <p class="saved-date">Saved on ${formatDate(publication.saved_at)}</p>
+            </div>
+            <div class="publication-actions">
+                <a href="publication.html?id=${publication.id}" class="btn btn-primary">View Details</a>
+                <button class="btn btn-outline remove-publication" data-id="${publication.id}">
+                    <i class="fas fa-trash"></i> Remove
+                </button>
+            </div>
+        `;
+        
+        savedList.appendChild(item);
+    });
+    
+    // Add clear all button
+    const clearAllSection = document.createElement('div');
+    clearAllSection.className = 'clear-all-section';
+    clearAllSection.innerHTML = `
+        <button id="clear-all-saved" class="btn btn-outline">
+            <i class="fas fa-trash-alt"></i> Clear All Saved Publications
+        </button>
+    `;
+    
+    // Clear container and add elements
+    container.innerHTML = '';
+    container.appendChild(savedList);
+    container.appendChild(clearAllSection);
+    
+    // Add event listeners for remove buttons
+    document.querySelectorAll('.remove-publication').forEach(button => {
+        button.addEventListener('click', function() {
+            const pubId = this.dataset.id;
+            removeSavedPublication(pubId);
+            // Remove the item from the DOM
+            this.closest('.saved-publication-item').remove();
+            
+            // Check if we have any left
+            if (document.querySelectorAll('.saved-publication-item').length === 0) {
+                loadSavedPublications(); // Reload to show empty state
+            }
+        });
+    });
+    
+    // Add event listener for clear all button
+    document.getElementById('clear-all-saved').addEventListener('click', function() {
+        if (confirm('Are you sure you want to remove all saved publications?')) {
+            localStorage.removeItem('saved_publications');
+            loadSavedPublications(); // Reload to show empty state
         }
-        
-        const result = await response.json();
-        return result;
-    } catch (error) {
-        console.error('API call failed:', error);
-        throw error;
-    } finally {
-        window.hideLoading();
-    }
+    });
 }
 
 /**
- * Format number with comma separators
+ * Remove a saved publication
  */
-function formatNumber(num) {
-    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+function removeSavedPublication(publicationId) {
+    const savedJson = localStorage.getItem('saved_publications');
+    if (!savedJson) return;
+    
+    const savedPublications = JSON.parse(savedJson);
+    const updatedPublications = savedPublications.filter(pub => pub.id !== publicationId);
+    
+    localStorage.setItem('saved_publications', JSON.stringify(updatedPublications));
 }
 
 /**
@@ -272,9 +485,8 @@ function formatDate(dateString) {
 }
 
 /**
- * Generate a truncated text with ellipsis
+ * Format number with comma separators
  */
-function truncateText(text, maxLength) {
-    if (text.length <= maxLength) return text;
-    return text.substr(0, maxLength) + '...';
+function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
 }

@@ -3,11 +3,86 @@
  * Handles research query submission and processing
  */
 
+// Define fallback loading functions if they don't exist
+if (typeof window.showLoading !== 'function') {
+    window.showLoading = function(message) {
+        console.log('Loading started:', message || 'Processing request...');
+        // Create a basic loading indicator if it doesn't exist
+        let loadingOverlay = document.getElementById('loading-overlay');
+        if (!loadingOverlay) {
+            loadingOverlay = document.createElement('div');
+            loadingOverlay.id = 'loading-overlay';
+            loadingOverlay.style.position = 'fixed';
+            loadingOverlay.style.top = '0';
+            loadingOverlay.style.left = '0';
+            loadingOverlay.style.width = '100%';
+            loadingOverlay.style.height = '100%';
+            loadingOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            loadingOverlay.style.display = 'flex';
+            loadingOverlay.style.justifyContent = 'center';
+            loadingOverlay.style.alignItems = 'center';
+            loadingOverlay.style.zIndex = '9999';
+            
+            const spinnerContainer = document.createElement('div');
+            spinnerContainer.style.textAlign = 'center';
+            spinnerContainer.style.color = 'white';
+            
+            const spinner = document.createElement('div');
+            spinner.style.border = '5px solid rgba(255, 255, 255, 0.3)';
+            spinner.style.borderTop = '5px solid white';
+            spinner.style.borderRadius = '50%';
+            spinner.style.width = '50px';
+            spinner.style.height = '50px';
+            spinner.style.margin = '0 auto 15px auto';
+            spinner.style.animation = 'spin 1s linear infinite';
+            
+            const style = document.createElement('style');
+            style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+            
+            const text = document.createElement('p');
+            text.textContent = message || 'Processing request...';
+            
+            spinnerContainer.appendChild(spinner);
+            spinnerContainer.appendChild(text);
+            loadingOverlay.appendChild(spinnerContainer);
+            document.head.appendChild(style);
+            document.body.appendChild(loadingOverlay);
+        } else {
+            loadingOverlay.style.display = 'flex';
+            const messageElement = loadingOverlay.querySelector('p');
+            if (messageElement && message) {
+                messageElement.textContent = message;
+            }
+        }
+    };
+}
+
+if (typeof window.hideLoading !== 'function') {
+    window.hideLoading = function() {
+        console.log('Loading finished');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        if (loadingOverlay) {
+            loadingOverlay.style.display = 'none';
+        }
+    };
+}
+
 document.addEventListener('DOMContentLoaded', function() {
+    // For the query form
     const queryForm = document.getElementById('research-query-form');
-    
     if (queryForm) {
         initializeQueryForm(queryForm);
+    }
+
+    // Safely initialize other forms only if they exist
+    const interdisciplinaryForm = document.getElementById('interdisciplinary-search-form');
+    if (interdisciplinaryForm) {
+        initializeInterdisciplinaryForm(interdisciplinaryForm);
+    }
+
+    const advancedSearchForm = document.getElementById('advanced-search-form');
+    if (advancedSearchForm) {
+        initializeAdvancedSearchForm(advancedSearchForm);
     }
 });
 
@@ -25,17 +100,101 @@ function initializeQueryForm(form) {
                 return;
             }
             
+            // Show loading indicator with safe check
+            try {
+                window.showLoading("Processing your search query...");
+            } catch (loadingError) {
+                console.warn("Loading indicator error:", loadingError);
+            }
+            
             // Get form data
             const queryData = getQueryFormData(form);
             
-            // Process query
-            await processQuery(queryData);
+            // Store the original query for displaying on results page
+            sessionStorage.setItem('original_query', queryData.query);
+            
+            console.log("Processing query:", queryData.query);
+            
+            // Perform the literature search directly
+            // Skip the separate query processing step which might cause issues
+            const searchOptions = {
+                max_results: 20,
+                analyze_results: true
+            };
+            
+            // Add year range if specified
+            const yearFrom = document.getElementById('year-from');
+            const yearTo = document.getElementById('year-to');
+            
+            if (yearFrom && yearFrom.value) {
+                searchOptions.from_year = parseInt(yearFrom.value);
+            }
+            
+            if (yearTo && yearTo.value) {
+                searchOptions.to_year = parseInt(yearTo.value);
+            }
+            
+            // Add publication type if specified
+            const publicationType = document.getElementById('publication-type');
+            if (publicationType && publicationType.value !== 'all') {
+                searchOptions.publication_types = [publicationType.value];
+            }
+            
+            // Check for open access filter
+            const openAccessFilter = document.querySelector('input[name="open-access-filter"]');
+            if (openAccessFilter && openAccessFilter.checked) {
+                searchOptions.open_access_only = true;
+            }
+            
+            // Perform the search
+            console.log("Sending search request with options:", searchOptions);
+            const searchResult = await ApiService.searchLiterature(queryData.query, searchOptions);
+            
+            // Add validation for search result structure
+            if (!searchResult) {
+                throw new Error('Received empty response from search API');
+            }
+            
+            if (searchResult.status !== 'success') {
+                throw new Error(searchResult.message || 'Error searching literature');
+            }
+            
+            // Ensure search result has expected properties
+            if (!searchResult.results) {
+                console.warn('Search response is missing results array');
+                searchResult.results = [];
+            }
+            
+            if (!searchResult.structured_query) {
+                searchResult.structured_query = {};
+            }
+            
+            // Store search results for the results page
+            sessionStorage.setItem('search_results', JSON.stringify(searchResult));
             
             // Navigate to results page
             window.location.href = 'results.html';
+            
         } catch (error) {
             console.error('Error processing query:', error);
-            alert('There was an error processing your query. Please try again.');
+            
+            // Provide a more descriptive message based on the error
+            let errorMessage = 'There was an error processing your query. Please try again.';
+            
+            if (error.message.includes('NoneType')) {
+                errorMessage = 'Unable to retrieve search results. The external research database may be unavailable.';
+            } else if (error.message.includes('API error: 5')) {
+                errorMessage = 'Cannot connect to the search server. Please try again later.';
+            }
+            
+            alert(errorMessage);
+        } finally {
+            // Hide loading indicator with safe check
+            try {
+                window.hideLoading();
+            } catch (loadingError) {
+                console.warn("Loading indicator error:", loadingError);
+            }
         }
     });
     
@@ -48,6 +207,248 @@ function initializeQueryForm(form) {
             }
         });
     }
+
+    // Initialize tags input fields
+    initializeTagsInput(form);
+}
+
+/**
+ * Initialize advanced search form
+ */
+function initializeAdvancedSearchForm(form) {
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        try {
+            // Validate the form
+            if (!validateAdvancedSearchForm(form)) {
+                return;
+            }
+            
+            // Show loading indicator with safe check
+            try {
+                window.showLoading("Processing advanced search...");
+            } catch (loadingError) {
+                console.warn("Loading indicator error:", loadingError);
+            }
+            
+            // Get form data
+            const researchAreas = getTags('research-areas-container');
+            const specificTopics = getTags('specific-topics-container');
+            const methodologies = getTags('methodologies-container');
+            
+            if (researchAreas.length === 0) {
+                throw new Error('At least one research area is required');
+            }
+            
+            // Prepare search options
+            const searchOptions = {
+                max_results: 20
+            };
+            
+            // Add year range if specified
+            const yearFrom = document.getElementById('year-from');
+            const yearTo = document.getElementById('year-to');
+            
+            if (yearFrom && yearFrom.value) {
+                searchOptions.from_year = parseInt(yearFrom.value);
+            }
+            
+            if (yearTo && yearTo.value) {
+                searchOptions.to_year = parseInt(yearTo.value);
+            }
+            
+            // Perform advanced search
+            const searchResult = await ApiService.advancedSearch(
+                researchAreas,
+                specificTopics,
+                methodologies,
+                searchOptions
+            );
+            
+            // Validate the search result
+            if (!searchResult) {
+                throw new Error('Received empty response from search API');
+            }
+            
+            if (searchResult.status !== 'success') {
+                throw new Error(searchResult.message || 'Error performing advanced search');
+            }
+            
+            // Ensure result has expected properties
+            if (!searchResult.results) {
+                searchResult.results = [];
+            }
+            
+            if (!searchResult.structured_query) {
+                searchResult.structured_query = {};
+            }
+            
+            // Create a synthetic query for display purposes
+            const syntheticQuery = `Research in ${researchAreas.join(', ')}`;
+            sessionStorage.setItem('original_query', syntheticQuery);
+            
+            // Store search results
+            sessionStorage.setItem('search_results', JSON.stringify(searchResult));
+            
+            // Navigate to results page
+            window.location.href = 'results.html';
+            
+        } catch (error) {
+            console.error('Error performing advanced search:', error);
+            alert(`Advanced search error: ${error.message}`);
+        } finally {
+            // Hide loading indicator with safe check
+            try {
+                window.hideLoading();
+            } catch (loadingError) {
+                console.warn("Loading indicator error:", loadingError);
+            }
+        }
+    });
+
+    // Initialize tags input fields if the form exists
+    if (form) {
+        initializeTagsInput(form);
+    }
+}
+
+/**
+ * Initialize interdisciplinary search form
+ */
+function initializeInterdisciplinaryForm(form) {
+    form.addEventListener('submit', async function(e) {
+        e.preventDefault();
+        
+        try {
+            // Validate the form
+            if (!validateInterdisciplinaryForm(form)) {
+                return;
+            }
+            
+            // Show loading indicator with safe check
+            try {
+                window.showLoading("Processing interdisciplinary search...");
+            } catch (loadingError) {
+                console.warn("Loading indicator error:", loadingError);
+            }
+            
+            // Get form data
+            const primaryDiscipline = document.getElementById('primary-discipline').value;
+            const secondaryDisciplines = getTags('secondary-disciplines-container');
+            
+            if (!primaryDiscipline) {
+                throw new Error('Primary discipline is required');
+            }
+            
+            if (secondaryDisciplines.length === 0) {
+                throw new Error('At least one secondary discipline is required');
+            }
+            
+            // Prepare search options
+            const searchOptions = {
+                max_results: 20
+            };
+            
+            // Add year range if specified
+            const yearFrom = document.getElementById('year-from');
+            if (yearFrom && yearFrom.value) {
+                searchOptions.from_year = parseInt(yearFrom.value);
+            } else {
+                // By default, search for recent 5 years
+                searchOptions.recent_years = 5;
+            }
+            
+            // Perform interdisciplinary search
+            const searchResult = await ApiService.interdisciplinarySearch(
+                primaryDiscipline,
+                secondaryDisciplines,
+                searchOptions
+            );
+            
+            // Validate the search result
+            if (!searchResult) {
+                throw new Error('Received empty response from search API');
+            }
+            
+            if (searchResult.status !== 'success') {
+                throw new Error(searchResult.message || 'Error performing interdisciplinary search');
+            }
+            
+            // Ensure result has expected properties
+            if (!searchResult.results) {
+                searchResult.results = [];
+            }
+            
+            // Create a synthetic query for display purposes
+            const syntheticQuery = `Research at the intersection of ${primaryDiscipline} and ${secondaryDisciplines.join(', ')}`;
+            sessionStorage.setItem('original_query', syntheticQuery);
+            
+            // Store search results
+            sessionStorage.setItem('search_results', JSON.stringify(searchResult));
+            sessionStorage.setItem('is_interdisciplinary', 'true');
+            
+            // Navigate to results page
+            window.location.href = 'results.html';
+            
+        } catch (error) {
+            console.error('Error performing interdisciplinary search:', error);
+            alert(`Interdisciplinary search error: ${error.message}`);
+        } finally {
+            // Hide loading indicator with safe check
+            try {
+                window.hideLoading();
+            } catch (loadingError) {
+                console.warn("Loading indicator error:", loadingError);
+            }
+        }
+    });
+
+    // Initialize tags input fields if the form exists
+    if (form) {
+        initializeTagsInput(form);
+    }
+}
+
+/**
+ * Initialize tags input functionality
+ */
+function initializeTagsInput(form) {
+    // Check if form exists
+    if (!form) {
+        console.warn("Form element not found for tags input initialization");
+        return;
+    }
+    
+    // Get tag containers with a safe method
+    const tagsContainers = form.querySelectorAll('.tags-input');
+    if (!tagsContainers || tagsContainers.length === 0) {
+        console.warn("No tags input containers found in the form");
+        return;
+    }
+    
+    tagsContainers.forEach(container => {
+        if (!container) return;
+        
+        const input = container.querySelector('input');
+        
+        if (!input) {
+            console.warn("Input element not found in tags container");
+            return;
+        }
+        
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ',') {
+                e.preventDefault();
+                
+                const value = this.value.trim();
+                if (value) {
+                    addTag(container, value);
+                    this.value = '';
+                }
+            }
+        });
+    });
 }
 
 /**
@@ -59,28 +460,104 @@ function validateQueryForm(form) {
     
     // Check main query text
     const queryInput = form.querySelector('#research-query');
-    if (!queryInput.value.trim()) {
+    if (!queryInput || !queryInput.value.trim()) {
         isValid = false;
         highlightInvalidField(queryInput);
-        errorMessages.push('Please describe your research interests');
+        errorMessages.push('Please describe your research query');
     }
     
     // Display errors if any
     if (!isValid) {
-        const errorContainer = document.createElement('div');
-        errorContainer.className = 'error-container';
-        errorContainer.innerHTML = errorMessages.map(msg => `<p>${msg}</p>`).join('');
-        
-        // Remove existing error container if present
-        const existingError = form.querySelector('.error-container');
-        if (existingError) {
-            existingError.remove();
-        }
-        
-        form.insertBefore(errorContainer, form.firstChild);
+        displayFormErrors(form, errorMessages);
     }
     
     return isValid;
+}
+
+/**
+ * Validate the advanced search form
+ */
+function validateAdvancedSearchForm(form) {
+    let isValid = true;
+    const errorMessages = [];
+    
+    // Check for research areas
+    const researchAreas = getTags('research-areas-container');
+    if (researchAreas.length === 0) {
+        isValid = false;
+        highlightInvalidField(document.getElementById('research-areas-container'));
+        errorMessages.push('Please add at least one research area');
+    }
+    
+    // Display errors if any
+    if (!isValid) {
+        displayFormErrors(form, errorMessages);
+    }
+    
+    return isValid;
+}
+
+/**
+ * Validate the interdisciplinary search form
+ */
+function validateInterdisciplinaryForm(form) {
+    let isValid = true;
+    const errorMessages = [];
+    
+    // Check primary discipline
+    const primaryDiscipline = document.getElementById('primary-discipline');
+    if (!primaryDiscipline || !primaryDiscipline.value.trim()) {
+        isValid = false;
+        highlightInvalidField(primaryDiscipline);
+        errorMessages.push('Primary discipline is required');
+    }
+    
+    // Check secondary disciplines
+    const secondaryDisciplines = getTags('secondary-disciplines-container');
+    if (secondaryDisciplines.length === 0) {
+        isValid = false;
+        highlightInvalidField(document.getElementById('secondary-disciplines-container'));
+        errorMessages.push('Please add at least one secondary discipline');
+    }
+    
+    // Display errors if any
+    if (!isValid) {
+        displayFormErrors(form, errorMessages);
+    }
+    
+    return isValid;
+}
+
+/**
+ * Display error messages for form validation
+ */
+function displayFormErrors(form, errorMessages) {
+    const errorContainer = document.createElement('div');
+    errorContainer.className = 'error-container';
+    errorContainer.innerHTML = errorMessages.map(msg => `<p>${msg}</p>`).join('');
+    
+    // Remove existing error container if present
+    const existingError = form.querySelector('.error-container');
+    if (existingError) {
+        existingError.remove();
+    }
+    
+    form.insertBefore(errorContainer, form.firstChild);
+}
+
+/**
+ * Highlight an invalid form field
+ */
+function highlightInvalidField(field) {
+    if (!field) return;
+    
+    field.classList.add('invalid');
+    
+    // Remove highlight when user interacts with the field
+    field.addEventListener('input', function onInput() {
+        field.classList.remove('invalid');
+        field.removeEventListener('input', onInput);
+    }, { once: true });
 }
 
 /**
@@ -90,90 +567,58 @@ function getQueryFormData(form) {
     const query = form.querySelector('#research-query').value.trim();
     const researchAreas = getTags('research-areas-container');
     const expertise = getTags('expertise-container');
+    let collaborationType = '';
     
-    // Get publication type and year range
-    const publicationType = form.querySelector('#publication-type')?.value;
-    const fromYear = parseInt(form.querySelector('#year-from')?.value);
-    const toYear = parseInt(form.querySelector('#year-to')?.value);
+    const typeSelect = form.querySelector('#collaboration-type');
+    if (typeSelect) {
+        collaborationType = typeSelect.value;
+    }
     
-    // Store form data in session storage for the results page
+    // Create form data object
     const formData = {
         query,
         research_areas: researchAreas,
         expertise: expertise,
-        publication_type: publicationType,
-        from_year: fromYear,
-        to_year: toYear,
+        collaboration_type: collaborationType,
         timestamp: new Date().toISOString()
     };
-    
-    // Save to session storage
-    sessionStorage.setItem('research_query', JSON.stringify(formData));
     
     return formData;
 }
 
 /**
- * Process the research query
+ * Get all tags from a specific container
  */
-async function processQuery(queryData) {
-    try {
-        window.showLoading();
-        
-        // Call the backend API to process the query
-        const response = await apiCall('/process_query', 'POST', queryData);
-        
-        // Store the processed query results
-        sessionStorage.setItem('processed_query', JSON.stringify(response));
-        
-        // Search for publications based on the processed query
-        const publications = await searchPublications(response, queryData);
-        
-        // Store the publication results
-        sessionStorage.setItem('publication_results', JSON.stringify(publications));
-        
-        return {
-            processedQuery: response,
-            publications: publications
-        };
-    } catch (error) {
-        console.error('Query processing error:', error);
-        throw error;
-    } finally {
-        window.hideLoading();
-    }
+function getTags(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    
+    const tags = container.querySelectorAll('.tag');
+    return Array.from(tags).map(tag => {
+        // Get text without the remove button
+        return tag.textContent.trim().replace('×', '');
+    });
 }
 
 /**
- * Search for publications based on processed query
+ * Add a new tag to a tags input container
  */
-async function searchPublications(processedQuery, formData) {
-    try {
-        // Prepare search parameters from processed query and form data
-        const searchParams = {
-            research_areas: processedQuery.research_areas || [],
-            expertise: processedQuery.expertise || [],
-            keywords: processedQuery.search_keywords || [],
-            from_year: formData.from_year,
-            to_year: formData.to_year,
-            max_results: 20
-        };
-        
-        // Add publication type filter if specified
-        if (formData.publication_type && formData.publication_type !== 'all') {
-            searchParams.publication_types = [formData.publication_type];
-        }
-        
-        // Log the search parameters for debugging
-        console.log('Search parameters:', searchParams);
-        
-        // Call publications search API
-        const publications = await apiCall('/search_publications', 'POST', searchParams);
-        return publications;
-    } catch (error) {
-        console.error('Publication search error:', error);
-        throw error;
-    }
+function addTag(container, text) {
+    const tag = document.createElement('span');
+    tag.classList.add('tag');
+    tag.innerHTML = `
+        ${text}
+        <span class="tag-remove">&times;</span>
+    `;
+    
+    // Add remove event listener
+    tag.querySelector('.tag-remove').addEventListener('click', function() {
+        tag.remove();
+    });
+    
+    // Insert before the input
+    const input = container.querySelector('input');
+    container.insertBefore(tag, input);
 }
 
 /**
@@ -182,28 +627,22 @@ async function searchPublications(processedQuery, formData) {
 function loadExampleQuery(exampleId, form) {
     const examples = {
         'quantum-computing': {
-            query: 'Looking for publications on quantum computing with focus on quantum error correction and superconducting qubits with applications in quantum machine learning.',
-            researchAreas: ['Quantum Computing', 'Machine Learning'],
+            query: 'Recent advances in quantum error correction and their implications for quantum computing',
+            researchAreas: ['Quantum Computing', 'Quantum Information Science'],
             expertise: ['Quantum Error Correction', 'Superconducting Qubits'],
-            publicationType: 'all',
-            fromYear: 2020,
-            toYear: 2025
+            collaborationType: 'research-project'
         },
         'climate-modeling': {
-            query: 'Need publications on climate modeling focused on predicting extreme weather events using high-resolution models, especially works on atmospheric physics and data visualization.',
+            query: 'High-resolution climate models for predicting extreme weather events',
             researchAreas: ['Climate Science', 'Atmospheric Physics'],
             expertise: ['Climate Modeling', 'Data Visualization'],
-            publicationType: 'journal-article',
-            fromYear: 2019,
-            toYear: 2025
+            collaborationType: 'research-project'
         },
         'medical-ai': {
-            query: 'Looking for research on AI algorithms for medical image analysis, specifically for early detection of neurological disorders from MRI scans.',
+            query: 'Applications of deep learning for medical image analysis in neurological disorders',
             researchAreas: ['Medical Imaging', 'Artificial Intelligence'],
             expertise: ['Deep Learning', 'Neuroimaging'],
-            publicationType: 'all',
-            fromYear: 2021,
-            toYear: 2025
+            collaborationType: 'grant-proposal'
         }
     };
     
@@ -211,34 +650,36 @@ function loadExampleQuery(exampleId, form) {
     if (!example) return;
     
     // Set query text
-    form.querySelector('#research-query').value = example.query;
+    const queryInput = form.querySelector('#research-query');
+    if (queryInput) {
+        queryInput.value = example.query;
+    }
     
     // Clear existing tags
     const researchAreasContainer = document.getElementById('research-areas-container');
     const expertiseContainer = document.getElementById('expertise-container');
     
-    Array.from(researchAreasContainer.querySelectorAll('.tag')).forEach(tag => tag.remove());
-    Array.from(expertiseContainer.querySelectorAll('.tag')).forEach(tag => tag.remove());
-    
-    // Add new tags
-    example.researchAreas.forEach(area => {
-        addTag(researchAreasContainer, area);
-    });
-    
-    example.expertise.forEach(exp => {
-        addTag(expertiseContainer, exp);
-    });
-    
-    // Set publication type
-    const publicationTypeSelect = form.querySelector('#publication-type');
-    if (publicationTypeSelect) {
-        publicationTypeSelect.value = example.publicationType;
+    if (researchAreasContainer) {
+        Array.from(researchAreasContainer.querySelectorAll('.tag')).forEach(tag => tag.remove());
+        
+        // Add new tags
+        example.researchAreas.forEach(area => {
+            addTag(researchAreasContainer, area);
+        });
     }
     
-    // Set year range
-    const yearFromInput = form.querySelector('#year-from');
-    const yearToInput = form.querySelector('#year-to');
+    if (expertiseContainer) {
+        Array.from(expertiseContainer.querySelectorAll('.tag')).forEach(tag => tag.remove());
+        
+        // Add new tags
+        example.expertise.forEach(exp => {
+            addTag(expertiseContainer, exp);
+        });
+    }
     
-    if (yearFromInput) yearFromInput.value = example.fromYear;
-    if (yearToInput) yearToInput.value = example.toYear;
+    // Set collaboration type
+    const collaborationTypeSelect = form.querySelector('#collaboration-type');
+    if (collaborationTypeSelect) {
+        collaborationTypeSelect.value = example.collaborationType;
+    }
 }

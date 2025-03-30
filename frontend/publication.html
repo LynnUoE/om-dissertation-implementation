@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/publication.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Load JavaScript files in the correct order -->
+    <script src="js/main.js"></script>
+    <script src="js/api-service.js"></script>
+    <script src="js/publication-view.js"></script>
 </head>
 <body>
     <header>
@@ -31,33 +35,33 @@
                 
                 <div class="publication-overview">
                     <div class="publication-primary-info">
-                        <h1 id="publication-title">Advances in Quantum Error Correction for Superconducting Qubits</h1>
-                        <p id="publication-authors">Johnson, S., Wilson, D., Chen, E.</p>
+                        <h1 id="publication-title">Loading publication title...</h1>
+                        <p id="publication-authors">Loading authors...</p>
                         <p id="publication-source">
-                            <span class="journal-name">Nature Quantum Information</span> | 
-                            <span class="publication-year">2023</span> | 
-                            <span class="publication-type">Journal Article</span>
+                            <span class="journal-name">Loading source...</span> | 
+                            <span class="publication-year"></span> | 
+                            <span class="publication-type"></span>
                         </p>
                         
                         <div class="publication-metrics">
                             <div class="metric">
                                 <i class="fas fa-quote-right"></i>
                                 <div class="metric-data">
-                                    <span class="metric-value">145</span>
+                                    <span class="metric-value">-</span>
                                     <span class="metric-label">Citations</span>
                                 </div>
                             </div>
                             <div class="metric">
                                 <i class="fas fa-calendar-alt"></i>
                                 <div class="metric-data">
-                                    <span class="metric-value">March 15, 2023</span>
+                                    <span class="metric-value">-</span>
                                     <span class="metric-label">Publication Date</span>
                                 </div>
                             </div>
                             <div class="metric">
                                 <i class="fas fa-book-open"></i>
                                 <div class="metric-data">
-                                    <span class="metric-value">Open Access</span>
+                                    <span class="metric-value">-</span>
                                     <span class="metric-label">Availability</span>
                                 </div>
                             </div>
@@ -68,7 +72,7 @@
                         <div class="relevance-summary">
                             <h3>Relevance Score</h3>
                             <div class="score-circle">
-                                <span>92%</span>
+                                <span>-</span>
                             </div>
                             <span class="relevance-label">Match to Query</span>
                         </div>
@@ -88,41 +92,10 @@
                     <div class="sidebar-section">
                         <h3>Topic Coverage</h3>
                         <div id="topic-breakdown">
-                            <div class="topic-item">
-                                <div class="topic-header">
-                                    <span>Quantum Error Correction</span>
-                                    <span class="topic-score">95%</span>
-                                </div>
-                                <div class="progress-bar">
-                                    <div class="progress" style="width: 95%"></div>
-                                </div>
-                            </div>
-                            <div class="topic-item">
-                                <div class="topic-header">
-                                    <span>Superconducting Qubits</span>
-                                    <span class="topic-score">88%</span>
-                                </div>
-                                <div class="progress-bar">
-                                    <div class="progress" style="width: 88%"></div>
-                                </div>
-                            </div>
-                            <div class="topic-item">
-                                <div class="topic-header">
-                                    <span>Quantum Computing</span>
-                                    <span class="topic-score">82%</span>
-                                </div>
-                                <div class="progress-bar">
-                                    <div class="progress" style="width: 82%"></div>
-                                </div>
-                            </div>
-                            <div class="topic-item">
-                                <div class="topic-header">
-                                    <span>Machine Learning</span>
-                                    <span class="topic-score">65%</span>
-                                </div>
-                                <div class="progress-bar">
-                                    <div class="progress" style="width: 65%"></div>
-                                </div>
+                            <!-- Topic breakdown will be populated here -->
+                            <div class="loading-placeholder">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                <p>Loading topics...</p>
                             </div>
                         </div>
                     </div>
@@ -130,17 +103,10 @@
                     <div class="sidebar-section">
                         <h3>Journal Impact</h3>
                         <div class="journal-metrics">
-                            <div class="journal-metric">
-                                <span class="metric-name">Impact Factor:</span>
-                                <span class="metric-value">8.75</span>
-                            </div>
-                            <div class="journal-metric">
-                                <span class="metric-name">H5-index:</span>
-                                <span class="metric-value">62</span>
-                            </div>
-                            <div class="journal-metric">
-                                <span class="metric-name">Quartile:</span>
-                                <span class="metric-value">Q1</span>
+                            <!-- Journal metrics will be populated here -->
+                            <div class="loading-placeholder">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                <p>Loading metrics...</p>
                             </div>
                         </div>
                     </div>
@@ -149,22 +115,11 @@
                         <h3>Similar Publications</h3>
                         <div class="similar-publications">
                             <ul class="similar-list">
-                                <li>
-                                    <a href="#">Fault-Tolerant Quantum Computing: Progress and Challenges</a>
-                                    <span class="pub-year">2021</span>
-                                </li>
-                                <li>
-                                    <a href="#">Novel Error Mitigation Techniques for NISQ Devices</a>
-                                    <span class="pub-year">2022</span>
-                                </li>
-                                <li>
-                                    <a href="#">Surface Code Implementation for Logical Qubits</a>
-                                    <span class="pub-year">2023</span>
-                                </li>
-                                <li>
-                                    <a href="#">Quantum Error Correction: A Review of Recent Advances</a>
-                                    <span class="pub-year">2022</span>
-                                </li>
+                                <!-- Similar publications will be populated here -->
+                                <div class="loading-placeholder">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>Loading similar works...</p>
+                                </div>
                             </ul>
                         </div>
                     </div>
@@ -183,25 +138,16 @@
                         <div class="tab-content active" id="abstract-tab">
                             <h2>Abstract</h2>
                             <div class="abstract-content">
-                                <p>
-                                    This paper presents a novel approach to quantum error correction that improves error thresholds for superconducting qubit architectures by 35% compared to previous methods. We introduce a modified surface code that is particularly well-suited for the connectivity constraints and noise characteristics of superconducting quantum processors.
-                                </p>
-                                <p>
-                                    Our method combines tailored quantum error correction codes with hardware-aware compilation techniques that account for the specific error channels present in superconducting qubit systems. Experimental validation on a 27-qubit superconducting processor demonstrates significant improvements in logical error rates and resource requirements compared to standard techniques.
-                                </p>
-                                <p>
-                                    These advances bring fault-tolerant quantum computing closer to practical implementation on near-term quantum hardware. Our approach is generalizable to other superconducting architectures and can be adapted to different qubit technologies with specific noise characteristics.
-                                </p>
+                                <div class="loading-placeholder">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>Loading abstract...</p>
+                                </div>
                             </div>
                             
                             <div class="keywords">
                                 <h3>Keywords</h3>
                                 <div class="keyword-list">
-                                    <span class="keyword">Quantum Error Correction</span>
-                                    <span class="keyword">Superconducting Qubits</span>
-                                    <span class="keyword">Surface Codes</span>
-                                    <span class="keyword">Fault Tolerance</span>
-                                    <span class="keyword">Quantum Computing</span>
+                                    <!-- Keywords will be populated here -->
                                 </div>
                             </div>
                         </div>
@@ -209,58 +155,19 @@
                         <div class="tab-content" id="methods-tab">
                             <h2>Methods</h2>
                             <div class="methods-content">
-                                <h3>Experimental Setup</h3>
-                                <p>
-                                    The experiments were conducted on a 27-qubit superconducting processor with tunable couplers. The processor features fixed-frequency transmon qubits arranged in a heavy-hexagon lattice, with nearest-neighbor connectivity mediated by tunable couplers. Single-qubit gate fidelities average 99.95%, and two-qubit gate fidelities average 99.6%.
-                                </p>
-                                
-                                <h3>Error Correction Protocol</h3>
-                                <p>
-                                    We implemented a modified surface code tailored to the specific noise characteristics of our superconducting processor. The protocol incorporates the following key innovations:
-                                </p>
-                                <ul>
-                                    <li>Asymmetric code distance allocation based on measured error biases</li>
-                                    <li>Dynamically adjusted syndrome measurement schedules</li>
-                                    <li>Hardware-aware qubit routing to minimize crosstalk</li>
-                                    <li>Optimized decoding algorithms for biased noise channels</li>
-                                </ul>
-                                
-                                <h3>Performance Evaluation</h3>
-                                <p>
-                                    We evaluated protocol performance using randomized benchmarking, process tomography, and logical error rate measurements. Comparison benchmarks included standard surface codes and Bacon-Shor codes implemented on the same hardware.
-                                </p>
+                                <div class="loading-placeholder">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>Loading methods information...</p>
+                                </div>
                             </div>
                         </div>
                         
                         <div class="tab-content" id="findings-tab">
                             <h2>Key Findings</h2>
                             <div class="findings-content">
-                                <div class="finding-item">
-                                    <h3>Improved Error Thresholds</h3>
-                                    <p>
-                                        Our modified surface code achieved a pseudo-threshold of approximately 1.2%, representing a 35% improvement over standard surface codes (0.89%) implemented on the same hardware.
-                                    </p>
-                                </div>
-                                
-                                <div class="finding-item">
-                                    <h3>Resource Efficiency</h3>
-                                    <p>
-                                        The tailored approach reduced the qubit overhead requirement by 28% while maintaining the same logical error rate, enabling more efficient implementation of logical qubits on resource-constrained hardware.
-                                    </p>
-                                </div>
-                                
-                                <div class="finding-item">
-                                    <h3>Scalability Analysis</h3>
-                                    <p>
-                                        Numerical simulations indicate that the approach scales favorably to larger system sizes, with projected resource requirements within reach of near-term superconducting quantum processors (50-100 qubits).
-                                    </p>
-                                </div>
-                                
-                                <div class="finding-item">
-                                    <h3>Noise Resilience</h3>
-                                    <p>
-                                        The modified protocol demonstrated particularly strong resilience against coherent errors and frequency collisions, which are common failure modes in fixed-frequency superconducting qubit architectures.
-                                    </p>
+                                <div class="loading-placeholder">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>Loading findings...</p>
                                 </div>
                             </div>
                         </div>
@@ -269,27 +176,10 @@
                             <h2>References</h2>
                             <div class="references-content">
                                 <ol class="reference-list">
-                                    <li>
-                                        <p class="reference-text">Fowler, A.G., Mariantoni, M., Martinis, J.M. & Cleland, A.N. Surface codes: Towards practical large-scale quantum computation. <em>Phys. Rev. A</em> <strong>86</strong>, 032324 (2012).</p>
-                                    </li>
-                                    <li>
-                                        <p class="reference-text">Gottesman, D. Stabilizer codes and quantum error correction. <em>arXiv:quant-ph/9705052</em> (1997).</p>
-                                    </li>
-                                    <li>
-                                        <p class="reference-text">Kitaev, A.Y. Fault-tolerant quantum computation by anyons. <em>Ann. Phys.</em> <strong>303</strong>, 2-30 (2003).</p>
-                                    </li>
-                                    <li>
-                                        <p class="reference-text">Bravyi, S.B. & Kitaev, A.Y. Quantum codes on a lattice with boundary. <em>arXiv:quant-ph/9811052</em> (1998).</p>
-                                    </li>
-                                    <li>
-                                        <p class="reference-text">Dennis, E., Kitaev, A., Landahl, A. & Preskill, J. Topological quantum memory. <em>J. Math. Phys.</em> <strong>43</strong>, 4452-4505 (2002).</p>
-                                    </li>
-                                    <li>
-                                        <p class="reference-text">Lidar, D.A. & Brun, T.A. <em>Quantum Error Correction</em> (Cambridge University Press, 2013).</p>
-                                    </li>
-                                    <li>
-                                        <p class="reference-text">Terhal, B.M. Quantum error correction for quantum memories. <em>Rev. Mod. Phys.</em> <strong>87</strong>, 307-346 (2015).</p>
-                                    </li>
+                                    <div class="loading-placeholder">
+                                        <i class="fas fa-spinner fa-spin"></i>
+                                        <p>Loading references...</p>
+                                    </div>
                                 </ol>
                             </div>
                         </div>
@@ -306,51 +196,14 @@
                             </div>
                             
                             <div class="citations-list">
-                                <div class="citation-item">
-                                    <h3 class="citation-title">
-                                        <a href="#">Hardware-Efficient Quantum Error Correction in Superconducting Circuits</a>
-                                    </h3>
-                                    <p class="citation-authors">Zhang, M., Lee, J., Brown, K.R.</p>
-                                    <p class="citation-source">
-                                        <span class="journal-name">Physical Review Letters</span>, 
-                                        <span class="citation-year">2024</span>
-                                    </p>
-                                    <p class="citation-excerpt">
-                                        "Building on the pioneering work of Johnson et al., we further optimize quantum error correction protocols for specific hardware constraints..."
-                                    </p>
-                                </div>
-                                
-                                <div class="citation-item">
-                                    <h3 class="citation-title">
-                                        <a href="#">Practical Fault-Tolerant Quantum Computing: A Comprehensive Review</a>
-                                    </h3>
-                                    <p class="citation-authors">Garcia, S., Miller, D.A., Thomson, L.J.</p>
-                                    <p class="citation-source">
-                                        <span class="journal-name">Reviews of Modern Physics</span>, 
-                                        <span class="citation-year">2023</span>
-                                    </p>
-                                    <p class="citation-excerpt">
-                                        "The modified surface code approach of Johnson et al. represents a significant milestone in adapting theoretical error correction schemes to real-world hardware..."
-                                    </p>
-                                </div>
-                                
-                                <div class="citation-item">
-                                    <h3 class="citation-title">
-                                        <a href="#">Demonstration of Logical Operations on Encoded Qubits Using Tailored Error Correction</a>
-                                    </h3>
-                                    <p class="citation-authors">Park, H., Matsuda, Y., Kim, J., Wallman, J.</p>
-                                    <p class="citation-source">
-                                        <span class="journal-name">Nature</span>, 
-                                        <span class="citation-year">2023</span>
-                                    </p>
-                                    <p class="citation-excerpt">
-                                        "We implement the hardware-aware error correction protocol recently developed by Johnson et al. to demonstrate the first fault-tolerant logical operations with fidelity exceeding 99.9%..."
-                                    </p>
+                                <div class="loading-placeholder">
+                                    <i class="fas fa-spinner fa-spin"></i>
+                                    <p>Loading citations...</p>
                                 </div>
                             </div>
                             
                             <div class="see-more">
-                                <button class="btn btn-outline">See All Citations (47) <i class="fas fa-chevron-down"></i></button>
+                                <button class="btn btn-outline">See All Citations <i class="fas fa-chevron-down"></i></button>
                             </div>
                         </div>
                     </div>
@@ -364,8 +217,5 @@
             <p>&copy; 2025 LitFinder. All rights reserved.</p>
         </div>
     </footer>
-
-    <script src="js/main.js"></script>
-    <script src="js/publication-view.js"></script>
 </body>
 </html>

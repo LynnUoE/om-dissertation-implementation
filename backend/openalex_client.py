@@ -20,15 +20,32 @@ class WorkResult:
     @classmethod
     def from_api_response(cls, data: Dict) -> 'WorkResult':
         """Create WorkResult from API response data"""
+        # First ensure data is a dictionary
+        if data is None:
+            data = {}
+        
+        # Get title safely
+        title = ''
+        if data.get('title') is not None:
+            title = html.unescape(data.get('title', ''))
+        
+        # Get authors safely
+        authors = []
+        for auth in data.get('authorships', []):
+            if auth is not None and isinstance(auth, dict):
+                author_obj = auth.get('author', {})
+                if isinstance(author_obj, dict):
+                    display_name = author_obj.get('display_name', '')
+                    if display_name:
+                        authors.append(display_name)
+        
+        # Get other fields with safe defaults
         return cls(
-            title=html.unescape(data.get('title', '')),
+            title=title,
             publication_date=data.get('publication_date', ''),
             citations=data.get('cited_by_count', 0),
             doi=data.get('doi'),
-            authors=[
-                auth.get('author', {}).get('display_name', '')
-                for auth in data.get('authorships', [])
-            ],
+            authors=authors,
             abstract=data.get('abstract')
         )
 
@@ -48,13 +65,21 @@ class OpenAlexResponse:
         seen_titles = set()
         unique_works = []
         
-        for work_data in self.data['results']:
-            work = WorkResult.from_api_response(work_data)
-            normalized_title = work.title.lower().strip()
-            if normalized_title not in seen_titles:
-                seen_titles.add(normalized_title)
-                unique_works.append(work)
-                
+        for work_data in self.data.get('results', []):
+            if work_data is None:
+                continue
+            
+            try:
+                work = WorkResult.from_api_response(work_data)
+                normalized_title = work.title.lower().strip() if work.title else ""
+                if normalized_title and normalized_title not in seen_titles:
+                    seen_titles.add(normalized_title)
+                    unique_works.append(work)
+            except Exception as e:
+                # Log the error but continue processing other works
+                logging.getLogger('OpenAlexClient').warning(f"Error processing work: {e}")
+                continue
+                    
         return unique_works
 
 class OpenAlexClient:
@@ -107,9 +132,8 @@ class OpenAlexClient:
                 
                 # Log the full URL with parameters
                 self.logger.info(f"Making API request: {prepared_request.url}")
-
-                response = self.session.request(method, url, params=params)
                 
+                response = self.session.request(method, url, params=params)
                 
                 if response.status_code != 200:
                     error_data = response.json() if response.content else {}
@@ -128,11 +152,20 @@ class OpenAlexClient:
                         error=error_message
                     )
                 
+                # Try to parse JSON response safely
+                try:
+                    response_data = response.json()
+                except ValueError:
+                    return OpenAlexResponse(
+                        status_code=response.status_code,
+                        data={},
+                        error="Invalid JSON response from API"
+                    )
                 
                 return OpenAlexResponse(
                     status_code=response.status_code,
-                    data=response.json(),
-                    meta=response.json().get('meta')
+                    data=response_data,
+                    meta=response_data.get('meta')
                 )
                 
             except requests.exceptions.RequestException as e:
@@ -144,6 +177,13 @@ class OpenAlexClient:
                         error=str(e)
                     )
                 time.sleep(self.rate_limit_delay * (attempt + 1))
+            except Exception as e:
+                self.logger.error(f"Unexpected error during API request: {str(e)}")
+                return OpenAlexResponse(
+                    status_code=500,
+                    data={},
+                    error=f"Unexpected error: {str(e)}"
+                )
             
             time.sleep(self.rate_limit_delay)
     
@@ -187,10 +227,10 @@ def create_client(email: str) -> OpenAlexClient:
 
 # Example usage
 if __name__ == "__main__":
-    client = create_client("s2231967@ed.ac.uk")
+    client = create_client("your-email@example.com")
     
     response = client.search_works(
-        query="machine learning neural networks",
+        query="artificial intelligence",
         from_year=2023,
         to_year=2024,
         sort="relevance_score:desc",
@@ -199,7 +239,7 @@ if __name__ == "__main__":
     )
     
     if not response.error:
-        print("\nRelevant Papers (2023-2024):")
+        print("\nHighly Cited AI Papers (2023-2024):")
         print("-" * 50)
         
         for work in response.get_works():

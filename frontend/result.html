@@ -7,6 +7,10 @@
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/results.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Load JavaScript files in the correct order -->
+    <script src="js/main.js"></script>
+    <script src="js/api-service.js"></script>
+    <script src="js/results-handler.js"></script>
 </head>
 <body>
     <header>
@@ -32,21 +36,19 @@
                     <div class="query-details">
                         <div id="query-text">
                             <h3>Your Query:</h3>
-                            <p id="original-query">Quantum computing with applications in machine learning...</p>
+                            <p id="original-query">Loading query...</p>
                         </div>
                         <div class="query-analysis">
                             <div class="analysis-section">
                                 <h3>Research Areas:</h3>
                                 <div id="research-areas-tags" class="tags-container">
-                                    <span class="tag">Quantum Computing</span>
-                                    <span class="tag">Machine Learning</span>
+                                    <!-- Research areas will be populated here -->
                                 </div>
                             </div>
                             <div class="analysis-section">
                                 <h3>Key Topics:</h3>
                                 <div id="expertise-tags" class="tags-container">
-                                    <span class="tag">Quantum Error Correction</span>
-                                    <span class="tag">Superconducting Qubits</span>
+                                    <!-- Topics will be populated here -->
                                 </div>
                             </div>
                         </div>
@@ -116,88 +118,50 @@
 
                     <div class="results-list">
                         <div id="results-count">
-                            <p>Showing <span>24</span> matching publications</p>
+                            <p>Showing <span>0</span> matching publications</p>
                         </div>
                         
                         <div id="publications-container">
                             <!-- Publication cards will be dynamically generated here -->
-                            <!-- Sample publication card -->
-                            <div class="publication-card">
-                                <div class="publication-info">
-                                    <h3 class="publication-title">Advances in Quantum Error Correction for Superconducting Qubits</h3>
-                                    <p class="publication-authors">Johnson, S., Wilson, D., Chen, E.</p>
-                                    <p class="publication-source">
-                                        <span class="journal-name">Nature Quantum Information</span>, 
-                                        <span class="publication-year">2023</span>
-                                    </p>
-                                    <div class="publication-metrics">
-                                        <span><i class="fas fa-quote-right"></i> 145 Citations</span>
-                                        <span><i class="fas fa-book"></i> Journal Article</span>
-                                    </div>
-                                    <div class="publication-abstract">
-                                        <p>This paper presents a novel approach to quantum error correction that improves error thresholds for superconducting qubit architectures by 35% compared to previous methods...</p>
-                                    </div>
-                                    <div class="relevance-match">
-                                        <h4>Topic Match:</h4>
-                                        <div class="match-bars">
-                                            <div class="match-item">
-                                                <span>Quantum Error Correction</span>
-                                                <div class="progress-bar">
-                                                    <div class="progress" style="width: 95%"></div>
-                                                </div>
-                                                <span>95%</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="publication-actions">
-                                    <a href="publication.html?id=12345" class="btn btn-primary">View Details</a>
-                                    <button class="btn btn-outline"><i class="fas fa-bookmark"></i> Save</button>
-                                </div>
-                            </div>
-                            
-                            <!-- Second sample publication card -->
-                            <div class="publication-card">
-                                <div class="publication-info">
-                                    <h3 class="publication-title">Quantum Machine Learning Applications in Near-Term Quantum Computers</h3>
-                                    <p class="publication-authors">Taylor, R., Martinez, J., Johnson, S.</p>
-                                    <p class="publication-source">
-                                        <span class="journal-name">Science</span>, 
-                                        <span class="publication-year">2022</span>
-                                    </p>
-                                    <div class="publication-metrics">
-                                        <span><i class="fas fa-quote-right"></i> 203 Citations</span>
-                                        <span><i class="fas fa-book"></i> Journal Article</span>
-                                    </div>
-                                    <div class="publication-abstract">
-                                        <p>A comprehensive review of quantum machine learning algorithms that can be implemented on current and near-term quantum computing hardware, with emphasis on practical applications...</p>
-                                    </div>
-                                    <div class="relevance-match">
-                                        <h4>Topic Match:</h4>
-                                        <div class="match-bars">
-                                            <div class="match-item">
-                                                <span>Quantum Machine Learning</span>
-                                                <div class="progress-bar">
-                                                    <div class="progress" style="width: 88%"></div>
-                                                </div>
-                                                <span>88%</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="publication-actions">
-                                    <a href="publication.html?id=67890" class="btn btn-primary">View Details</a>
-                                    <button class="btn btn-outline"><i class="fas fa-bookmark"></i> Save</button>
-                                </div>
+                            <div class="loading-placeholder">
+                                <i class="fas fa-spinner fa-spin"></i>
+                                <p>Loading publications...</p>
                             </div>
                         </div>
                         
                         <div class="pagination">
                             <button class="btn btn-pagination" disabled><i class="fas fa-chevron-left"></i></button>
-                            <span class="pagination-info">Page 1 of 3</span>
-                            <button class="btn btn-pagination"><i class="fas fa-chevron-right"></i></button>
+                            <span class="pagination-info">Page 1 of 1</span>
+                            <button class="btn btn-pagination" disabled><i class="fas fa-chevron-right"></i></button>
                         </div>
                     </div>
+                </div>
+                
+                <!-- Analysis section -->
+                <div id="analysis-container" class="analysis-container hidden">
+                    <h2>Literature Analysis</h2>
+                    <div class="analysis-tabs">
+                        <button class="analysis-tab active" data-tab="literature-summary">Summary</button>
+                        <button class="analysis-tab" data-tab="methodology-analysis">Methodology</button>
+                        <button class="analysis-tab" data-tab="research-synthesis">Synthesis</button>
+                    </div>
+                    <div class="analysis-content">
+                        <div id="literature-summary" class="analysis-panel active">
+                            <!-- Literature summary will be populated here -->
+                        </div>
+                        <div id="methodology-analysis" class="analysis-panel">
+                            <!-- Methodology analysis will be populated here -->
+                        </div>
+                        <div id="research-synthesis" class="analysis-panel">
+                            <!-- Research synthesis will be populated here -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Interdisciplinary analysis section -->
+                <div id="interdisciplinary-analysis" class="interdisciplinary-container hidden">
+                    <h2>Interdisciplinary Research Analysis</h2>
+                    <!-- Interdisciplinary analysis will be populated here -->
                 </div>
             </div>
         </section>
@@ -208,8 +172,5 @@
             <p>&copy; 2025 LitFinder. All rights reserved.</p>
         </div>
     </footer>
-
-    <script src="js/main.js"></script>
-    <script src="js/results-handler.js"></script>
 </body>
 </html>

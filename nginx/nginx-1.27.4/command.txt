@@ -4,3 +4,4 @@ taskkill /F /IM nginx.exe
 
 # Start Nginx with the specific configuration file
 nginx -c "D:/UoE/Informatics/Year4/Dissertation/OpenOpportunity/My implementation/My-dissertation-implementation/nginx/nginx-1.27.4/conf/nginx.conf"
+

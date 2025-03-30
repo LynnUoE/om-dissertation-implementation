@@ -6,6 +6,10 @@
     <title>Literature Search Engine</title>
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Load JavaScript files in the correct order -->
+    <script src="js/main.js"></script>
+    <script src="js/api-service.js"></script>
+    <script src="js/query-processor.js"></script>
 </head>
 <body>
     <header>
@@ -122,13 +126,5 @@
             <p>&copy; 2025 LitFinder. All rights reserved.</p>
         </div>
     </footer>
-
-    <div id="loading-overlay" class="hidden">
-        <div class="spinner"></div>
-        <p>Analyzing your query...</p>
-    </div>
-
-    <script src="js/main.js"></script>
-    <script src="js/query-processor.js"></script>
 </body>
 </html>

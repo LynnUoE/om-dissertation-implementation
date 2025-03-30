@@ -3,6 +3,70 @@
  * Manages and displays search results for literature search
  */
 
+// Define fallback loading functions if they don't exist
+if (typeof window.showLoading !== 'function') {
+    window.showLoading = function(message) {
+        console.log('Loading started:', message || 'Processing request...');
+        // Create a basic loading indicator if it doesn't exist
+        let loadingOverlay = document.getElementById('loading-overlay');
+        if (!loadingOverlay) {
+            loadingOverlay = document.createElement('div');
+            loadingOverlay.id = 'loading-overlay';
+            loadingOverlay.style.position = 'fixed';
+            loadingOverlay.style.top = '0';
+            loadingOverlay.style.left = '0';
+            loadingOverlay.style.width = '100%';
+            loadingOverlay.style.height = '100%';
+            loadingOverlay.style.backgroundColor = 'rgba(0, 0, 0, 0.7)';
+            loadingOverlay.style.display = 'flex';
+            loadingOverlay.style.justifyContent = 'center';
+            loadingOverlay.style.alignItems = 'center';
+            loadingOverlay.style.zIndex = '9999';
+            
+            const spinnerContainer = document.createElement('div');
+            spinnerContainer.style.textAlign = 'center';
+            spinnerContainer.style.color = 'white';
+            
+            const spinner = document.createElement('div');
+            spinner.style.border = '5px solid rgba(255, 255, 255, 0.3)';
+            spinner.style.borderTop = '5px solid white';
+            spinner.style.borderRadius = '50%';
+            spinner.style.width = '50px';
+            spinner.style.height = '50px';
+            spinner.style.margin = '0 auto 15px auto';
+            spinner.style.animation = 'spin 1s linear infinite';
+            
+            const style = document.createElement('style');
+            style.textContent = '@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }';
+            
+            const text = document.createElement('p');
+            text.textContent = message || 'Processing request...';
+            
+            spinnerContainer.appendChild(spinner);
+            spinnerContainer.appendChild(text);
+            loadingOverlay.appendChild(spinnerContainer);
+            document.head.appendChild(style);
+            document.body.appendChild(loadingOverlay);
+        } else {
+            loadingOverlay.style.display = 'flex';
+            const messageElement = loadingOverlay.querySelector('p');
+            if (messageElement && message) {
+                messageElement.textContent = message;
+            }
+        }
+    };
+}
+
+if (typeof window.hideLoading !== 'function') {
+    window.hideLoading = function() {
+        console.log('Loading finished');
+        const loadingOverlay = document.getElementById('loading-overlay');
+        if (loadingOverlay) {
+            loadingOverlay.style.display = 'none';
+        }
+    };
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     // Check if we're on the results page
     const publicationsContainer = document.getElementById('publications-container');
@@ -18,25 +82,50 @@ document.addEventListener('DOMContentLoaded', function() {
 /**
  * Initialize the results page with query data and results
  */
-function initializeResultsPage() {
+async function initializeResultsPage() {
     try {
-        // Load query data from session storage
-        const queryData = getStoredQueryData();
-        if (!queryData) {
+        // Show loading indicator with safe check
+        try {
+            window.showLoading("Loading search results...");
+        } catch (loadingError) {
+            console.warn("Loading indicator error:", loadingError);
+        }
+        
+        // Get stored search results from session storage
+        const searchResultsJson = sessionStorage.getItem('search_results');
+        if (!searchResultsJson) {
             redirectToHome();
             return;
         }
         
-        // Display query information
-        displayQuerySummary(queryData);
+        const searchResults = JSON.parse(searchResultsJson);
         
-        // Load and display publication results
-        const publications = getStoredPublicationResults();
-        if (publications && publications.length > 0) {
-            displayPublicationResults(publications);
-            updateResultsCount(publications.length);
+        // Check if results were found
+        if (searchResults.status !== 'success') {
+            displayErrorMessage(searchResults.message || 'Error retrieving search results');
+            return;
+        }
+        
+        // Display query information
+        displayQuerySummary(searchResults);
+        
+        // Display publication results
+        if (searchResults.results && searchResults.results.length > 0) {
+            displayPublicationResults(searchResults.results);
+            updateResultsCount(searchResults.results.length);
         } else {
             displayNoResults();
+        }
+        
+        // Display analysis if available
+        if (searchResults.analysis) {
+            displayAnalysis(searchResults.analysis);
+        }
+        
+        // Display interdisciplinary analysis if available
+        const isInterdisciplinary = sessionStorage.getItem('is_interdisciplinary') === 'true';
+        if (isInterdisciplinary && searchResults.interdisciplinary_analysis) {
+            displayInterdisciplinaryAnalysis(searchResults.interdisciplinary_analysis, searchResults.interdisciplinary_synthesis);
         }
         
         // Set up Modify Search button
@@ -45,53 +134,40 @@ function initializeResultsPage() {
     } catch (error) {
         console.error('Error initializing results page:', error);
         displayErrorMessage('There was an error loading the results. Please try a new search.');
+    } finally {
+        // Hide loading indicator with safe check
+        try {
+            window.hideLoading();
+        } catch (loadingError) {
+            console.warn("Loading indicator error:", loadingError);
+        }
     }
 }
 
-/**
- * Get stored query data from session storage
- */
-function getStoredQueryData() {
-    const queryJson = sessionStorage.getItem('research_query');
-    const processedQueryJson = sessionStorage.getItem('processed_query');
-    
-    if (!queryJson) return null;
-    
-    const queryData = JSON.parse(queryJson);
-    
-    // Add processed data if available
-    if (processedQueryJson) {
-        queryData.processed = JSON.parse(processedQueryJson);
-    }
-    
-    return queryData;
-}
-
-/**
- * Get stored publication results from session storage
- */
-function getStoredPublicationResults() {
-    const resultsJson = sessionStorage.getItem('publication_results');
-    return resultsJson ? JSON.parse(resultsJson) : null;
-}
 
 /**
  * Display query summary information
  */
-function displayQuerySummary(queryData) {
+function displayQuerySummary(searchResults) {
+    // Original query from session storage
+    const originalQuery = sessionStorage.getItem('original_query');
+    
     // Set original query text
     const queryTextElement = document.getElementById('original-query');
-    if (queryTextElement) {
-        queryTextElement.textContent = queryData.query;
+    if (queryTextElement && originalQuery) {
+        queryTextElement.textContent = originalQuery;
     }
+    
+    // Get structured query from search results
+    const structuredQuery = searchResults.structured_query;
+    if (!structuredQuery) return;
     
     // Set research areas tags
     const researchAreasContainer = document.getElementById('research-areas-tags');
-    if (researchAreasContainer) {
+    if (researchAreasContainer && structuredQuery.research_areas) {
         researchAreasContainer.innerHTML = '';
         
-        const areasToShow = queryData.processed?.research_areas || queryData.research_areas;
-        areasToShow.forEach(area => {
+        structuredQuery.research_areas.forEach(area => {
             const tag = document.createElement('span');
             tag.className = 'tag';
             tag.textContent = area;
@@ -99,13 +175,12 @@ function displayQuerySummary(queryData) {
         });
     }
     
-    // Set key topics tags
+    // Set expertise/topics tags
     const topicsContainer = document.getElementById('expertise-tags');
-    if (topicsContainer) {
+    if (topicsContainer && structuredQuery.expertise) {
         topicsContainer.innerHTML = '';
         
-        const topicsToShow = queryData.processed?.expertise || queryData.expertise;
-        topicsToShow.forEach(item => {
+        structuredQuery.expertise.forEach(item => {
             const tag = document.createElement('span');
             tag.className = 'tag';
             tag.textContent = item;
@@ -192,6 +267,7 @@ function createPublicationCard(publication) {
             <div class="publication-metrics">
                 <span><i class="fas fa-quote-right"></i> ${formatNumber(publication.citations || 0)} Citations</span>
                 <span><i class="${pubTypeIcon}"></i> ${pubTypeLabel}</span>
+                ${publication.open_access ? '<span><i class="fas fa-unlock"></i> Open Access</span>' : ''}
             </div>
             <div class="publication-abstract">
                 <p>${abstract}</p>
@@ -242,6 +318,13 @@ function formatAuthors(authors) {
 }
 
 /**
+ * Format number with comma separators
+ */
+function formatNumber(num) {
+    return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
  * Save a publication to saved list
  */
 function savePublication(publication) {
@@ -260,7 +343,7 @@ function savePublication(publication) {
             title: publication.title,
             authors: publication.authors,
             journal: publication.journal,
-            year: new Date(publication.publication_date).getFullYear(),
+            year: publication.publication_date ? new Date(publication.publication_date).getFullYear() : 'Unknown',
             saved_at: new Date().toISOString()
         });
         
@@ -381,6 +464,186 @@ function setupModifySearchButton() {
 }
 
 /**
+ * Display analysis results if available
+ */
+function displayAnalysis(analysis) {
+    // Check if analysis container exists
+    const analysisContainer = document.getElementById('analysis-container');
+    if (!analysisContainer) return;
+    
+    // Make analysis container visible
+    analysisContainer.classList.remove('hidden');
+    
+    // Display literature summary if available
+    if (analysis.literature_summary) {
+        const summaryContainer = document.getElementById('literature-summary');
+        if (summaryContainer) {
+            const summary = analysis.literature_summary;
+            
+            let summaryHtml = '<h3>Literature Summary</h3>';
+            
+            if (summary.top_themes && summary.top_themes.length > 0) {
+                summaryHtml += `<div class="summary-section">
+                    <h4>Key Themes</h4>
+                    <ul>
+                        ${summary.top_themes.map(theme => `<li>${theme}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+            
+            if (summary.consensus_findings && summary.consensus_findings.length > 0) {
+                summaryHtml += `<div class="summary-section">
+                    <h4>Consensus Findings</h4>
+                    <ul>
+                        ${summary.consensus_findings.map(finding => `<li>${finding}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+            
+            if (summary.knowledge_gaps && summary.knowledge_gaps.length > 0) {
+                summaryHtml += `<div class="summary-section">
+                    <h4>Research Gaps</h4>
+                    <ul>
+                        ${summary.knowledge_gaps.map(gap => `<li>${gap}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+            
+            summaryContainer.innerHTML = summaryHtml;
+        }
+    }
+    
+    // Display methodology analysis if available
+    if (analysis.methodology_analysis) {
+        const methodologyContainer = document.getElementById('methodology-analysis');
+        if (methodologyContainer) {
+            const methodologyData = analysis.methodology_analysis;
+            
+            let methodologyHtml = '<h3>Methodology Analysis</h3>';
+            
+            if (methodologyData.dominant_paradigms && methodologyData.dominant_paradigms.length > 0) {
+                methodologyHtml += `<div class="summary-section">
+                    <h4>Dominant Research Methods</h4>
+                    <ul>
+                        ${methodologyData.dominant_paradigms.map(method => `<li>${method}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+            
+            if (methodologyData.innovative_methods && methodologyData.innovative_methods.length > 0) {
+                methodologyHtml += `<div class="summary-section">
+                    <h4>Innovative Approaches</h4>
+                    <ul>
+                        ${methodologyData.innovative_methods.map(method => `<li>${method}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+            
+            methodologyContainer.innerHTML = methodologyHtml;
+        }
+    }
+    
+    // Display synthesis if available
+    if (analysis.synthesis) {
+        const synthesisContainer = document.getElementById('research-synthesis');
+        if (synthesisContainer) {
+            const synthesis = analysis.synthesis;
+            
+            let synthesisHtml = '<h3>Research Synthesis</h3>';
+            
+            if (synthesis.research_themes && synthesis.research_themes.length > 0) {
+                synthesisHtml += `<div class="summary-section">
+                    <h4>Major Research Themes</h4>
+                    <ul>
+                        ${synthesis.research_themes.map(theme => `<li>${theme}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+            
+            if (synthesis.suggested_directions && synthesis.suggested_directions.length > 0) {
+                synthesisHtml += `<div class="summary-section">
+                    <h4>Future Research Directions</h4>
+                    <ul>
+                        ${synthesis.suggested_directions.map(direction => `<li>${direction}</li>`).join('')}
+                    </ul>
+                </div>`;
+            }
+            
+            synthesisContainer.innerHTML = synthesisHtml;
+        }
+    }
+}
+
+/**
+ * Display interdisciplinary analysis if available
+ */
+function displayInterdisciplinaryAnalysis(interdisciplinaryAnalysis, interdisciplinarySynthesis) {
+    // Check if container exists
+    const container = document.getElementById('interdisciplinary-analysis');
+    if (!container) return;
+    
+    // Make container visible
+    container.classList.remove('hidden');
+    
+    // Create analysis content
+    let analysisHtml = '<h3>Interdisciplinary Research Analysis</h3>';
+    
+    // Display intersection keywords
+    if (interdisciplinaryAnalysis.intersection_keywords && interdisciplinaryAnalysis.intersection_keywords.length > 0) {
+        analysisHtml += `<div class="summary-section">
+            <h4>Key Interdisciplinary Concepts</h4>
+            <div class="tags-container">
+                ${interdisciplinaryAnalysis.intersection_keywords.map(keyword => 
+                    `<span class="tag">${keyword}</span>`).join('')}
+            </div>
+        </div>`;
+    }
+    
+    // Display bridging concepts
+    if (interdisciplinaryAnalysis.bridging_concepts && interdisciplinaryAnalysis.bridging_concepts.length > 0) {
+        analysisHtml += `<div class="summary-section">
+            <h4>Bridging Concepts</h4>
+            <ul>
+                ${interdisciplinaryAnalysis.bridging_concepts.map(concept => 
+                    `<li>${concept}</li>`).join('')}
+            </ul>
+        </div>`;
+    }
+    
+    // Display synthesis if available
+    if (interdisciplinarySynthesis) {
+        if (interdisciplinarySynthesis.interdisciplinary_significance) {
+            analysisHtml += `<div class="summary-section">
+                <h4>Significance of This Intersection</h4>
+                <p>${interdisciplinarySynthesis.interdisciplinary_significance}</p>
+            </div>`;
+        }
+        
+        if (interdisciplinarySynthesis.knowledge_gaps && interdisciplinarySynthesis.knowledge_gaps.length > 0) {
+            analysisHtml += `<div class="summary-section">
+                <h4>Research Gaps at This Intersection</h4>
+                <ul>
+                    ${interdisciplinarySynthesis.knowledge_gaps.map(gap => 
+                        `<li>${gap}</li>`).join('')}
+                </ul>
+            </div>`;
+        }
+        
+        if (interdisciplinarySynthesis.future_directions && interdisciplinarySynthesis.future_directions.length > 0) {
+            analysisHtml += `<div class="summary-section">
+                <h4>Promising Research Directions</h4>
+                <ul>
+                    ${interdisciplinarySynthesis.future_directions.map(direction => 
+                        `<li>${direction}</li>`).join('')}
+                </ul>
+            </div>`;
+        }
+    }
+    
+    container.innerHTML = analysisHtml;
+}
+
+/**
  * Initialize filters and sorting functionality
  */
 function initializeFiltersAndSorting() {
@@ -438,7 +701,13 @@ function initializeFiltersAndSorting() {
  * Sort publication results based on selected option
  */
 function sortPublicationResults(sortOption) {
-    const publications = getStoredPublicationResults();
+    // Get search results from session storage
+    const searchResultsJson = sessionStorage.getItem('search_results');
+    if (!searchResultsJson) return;
+    
+    const searchResults = JSON.parse(searchResultsJson);
+    const publications = searchResults.results;
+    
     if (!publications || publications.length === 0) return;
     
     let sortedPublications = [...publications];
@@ -474,7 +743,13 @@ function sortPublicationResults(sortOption) {
  * Apply all active filters to publication results
  */
 function applyFilters() {
-    const publications = getStoredPublicationResults();
+    // Get search results from session storage
+    const searchResultsJson = sessionStorage.getItem('search_results');
+    if (!searchResultsJson) return;
+    
+    const searchResults = JSON.parse(searchResultsJson);
+    const publications = searchResults.results;
+    
     if (!publications || publications.length === 0) return;
     
     // Get filter values

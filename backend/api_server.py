@@ -1,212 +1,494 @@
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify, send_from_directory, abort
 from flask_cors import CORS
 import logging
 import os
 import json
 from datetime import datetime
+from typing import Dict, List, Any, Optional
+import time
 
 # Import custom modules
-from query_processor import QueryProcessor
-from literature_searcher import create_literature_searcher
+from query_processor import create_query_processor
+from openalex_client import create_client
+from research_analyzer import create_analyzer
+from literature_searcher import create_literature_searcher, LiteratureSearcher
 
+# Load environment variables
 from dotenv import load_dotenv
-import os
-
-# Load environment variables from .env file
 load_dotenv()
 
+# Configuration
+class Config:
+    """Application configuration"""
+    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    RESEARCHER_EMAIL = os.getenv("RESEARCHER_EMAIL", "research@example.com")
+    STATIC_FOLDER = os.getenv("STATIC_FOLDER", "../frontend")
+    CACHE_DURATION = int(os.getenv("CACHE_DURATION", "24"))  # Hours
+    DEBUG = os.getenv("DEBUG", "False").lower() == "true"
+    HOST = os.getenv("HOST", "0.0.0.0")
+    PORT = int(os.getenv("PORT", "5000"))
+    REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "120"))  # Seconds
+    MAX_RESULTS = int(os.getenv("MAX_RESULTS", "20"))
+    
+    @classmethod
+    def validate(cls):
+        """Validate required configuration"""
+        if not cls.OPENAI_API_KEY:
+            raise ValueError("OPENAI_API_KEY is required")
+        
+        if not os.path.isdir(cls.STATIC_FOLDER):
+            raise ValueError(f"Static folder does not exist: {cls.STATIC_FOLDER}")
 
-
-app = Flask(__name__, static_folder='../static')
+# Initialize Flask application
+app = Flask(__name__, static_folder=Config.STATIC_FOLDER)
 CORS(app)  # Enable CORS for all routes
 
 # Configure logging
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.INFO if Config.DEBUG else logging.WARNING,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('api_server')
 
-# Initialize components
-query_processor = QueryProcessor(api_key=os.getenv("OPENAI_API_KEY"))
-literature_searcher = create_literature_searcher(os.getenv("RESEARCHER_EMAIL"))
+# Initialize literature searcher (main component that orchestrates the others)
+literature_searcher: Optional[LiteratureSearcher] = None
 
-# Serve static files
+def get_literature_searcher() -> LiteratureSearcher:
+    """Get or initialize the literature searcher singleton"""
+    global literature_searcher
+    if literature_searcher is None:
+        literature_searcher = create_literature_searcher(
+            Config.OPENAI_API_KEY,
+            Config.RESEARCHER_EMAIL
+        )
+    return literature_searcher
+
+# Request tracking for analytics and debugging
+request_stats = {
+    'total_requests': 0,
+    'successful_requests': 0,
+    'failed_requests': 0,
+    'average_response_time': 0
+}
+
+# API Routes
 @app.route('/')
 def index():
+    """Serve the main index page"""
     return send_from_directory(app.static_folder, 'index.html')
 
 @app.route('/<path:path>')
 def static_files(path):
-    return send_from_directory(app.static_folder, path)
-
-# API Endpoints
-@app.route('/api/process_query', methods=['POST'])
-def process_query():
-    """Process a research query and extract structured information"""
+    """Serve static files"""
     try:
-        # Get query data from request
+        return send_from_directory(app.static_folder, path)
+    except:
+        # If the file doesn't exist, return the index for client-side routing
+        return send_from_directory(app.static_folder, 'index.html')
+
+@app.route('/api/health_check')
+def health_check():
+    """Health check endpoint for monitoring"""
+    return jsonify({
+        'status': 'healthy',
+        'timestamp': datetime.now().isoformat(),
+        'version': '1.0.0',
+        'stats': request_stats
+    })
+
+@app.route('/api/search', methods=['POST'])
+def search_literature():
+    """
+    Natural language literature search endpoint
+    
+    Expects JSON with:
+    - query: Natural language query describing research interests
+    - options: Optional parameters for search customization
+    """
+    start_time = time.time()
+    request_stats['total_requests'] += 1
+    
+    try:
+        # Get request data
         data = request.json
         if not data or 'query' not in data:
-            return jsonify({'error': 'Missing query data'}), 400
+            request_stats['failed_requests'] += 1
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing query parameter'
+            }), 400
         
-        # Process query
-        structured_query = query_processor.process_query(data['query'])
-        
-        if not structured_query or not query_processor.validate_query(structured_query):
-            return jsonify({'error': 'Could not process query'}), 400
-        
-        # Add any additional fields from the request
-        if 'research_areas' in data and data['research_areas']:
-            structured_query['research_areas'].extend(data['research_areas'])
-            # Remove duplicates
-            structured_query['research_areas'] = list(set(structured_query['research_areas']))
-            
-        if 'expertise' in data and data['expertise']:
-            structured_query['expertise'].extend(data['expertise'])
-            # Remove duplicates
-            structured_query['expertise'] = list(set(structured_query['expertise']))
-        
-        return jsonify(structured_query), 200
-        
-    except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
-        return jsonify({'error': 'An error occurred while processing the query'}), 500
-
-@app.route('/api/search_publications', methods=['POST'])
-def search_publications():
-    """Search for publications based on structured query"""
-    try:
-        # Get search parameters from request
-        data = request.json
-        if not data:
-            return jsonify({'error': 'Missing search parameters'}), 400
+        query = data['query']
+        options = data.get('options', {})
         
         # Extract search parameters
-        structured_query = {
-            'research_areas': data.get('research_areas', []),
-            'expertise': data.get('expertise', []),
-            'search_keywords': data.get('keywords', [])
-        }
+        max_results = min(options.get('max_results', Config.MAX_RESULTS), 50)  # Limit to 50 max
+        from_year = options.get('from_year')
+        to_year = options.get('to_year')
+        min_citations = options.get('min_citations')
+        publication_types = options.get('publication_types')
+        open_access_only = options.get('open_access_only', False)
+        analyze_results = options.get('analyze_results', True)
         
-        # Extract filter parameters
-        from_year = data.get('from_year')
-        to_year = data.get('to_year') 
-        min_citations = data.get('min_citations')
-        publication_types = data.get('publication_types')
-        open_access_only = data.get('open_access_only', False)
-        max_results = data.get('max_results', 20)
+        # Create request timeout context
+        def timeout_handler():
+            abort(408, description="Request timeout")
         
-        # Search for publications
-        publications = literature_searcher.search_literature(
-            structured_query=structured_query,
+        # Set timeout
+        # Note: In production, you'd implement this differently as Flask doesn't have native request timeouts
+        # This is a placeholder for the actual implementation
+        
+        # Perform literature search
+        searcher = get_literature_searcher()
+        result = searcher.search(
+            query=query,
             max_results=max_results,
             from_year=from_year,
             to_year=to_year,
             min_citations=min_citations,
             publication_types=publication_types,
-            open_access_only=open_access_only
+            open_access_only=open_access_only,
+            analyze_results=analyze_results
         )
         
-        # Convert results to dictionaries
-        results = [pub.to_dict() for pub in publications]
+        # Log results
+        if result['status'] == 'success':
+            logger.info(
+                f"Search successful: '{query[:50]}...' - Found {len(result.get('results', []))} results"
+            )
+            request_stats['successful_requests'] += 1
+        else:
+            logger.error(f"Search failed: '{query[:50]}...' - {result.get('message', 'Unknown error')}")
+            request_stats['failed_requests'] += 1
         
-        # Store results in session storage (simulated here with a file)
-        # In a real implementation, you might use Redis or another cache
-        publication_results_file = 'publication_results.json'
-        with open(publication_results_file, 'w') as f:
-            json.dump(results, f)
-        
-        return jsonify(results), 200
-        
-    except Exception as e:
-        logger.error(f"Error searching publications: {str(e)}")
-        return jsonify({'error': 'An error occurred while searching for publications'}), 500
-
-@app.route('/api/publication/<publication_id>', methods=['GET'])
-def get_publication(publication_id):
-    """Get detailed information about a specific publication"""
-    try:
-        # Get publication details
-        publication = literature_searcher.get_publication_details(publication_id)
-        
-        if not publication:
-            return jsonify({'error': 'Publication not found'}), 404
-        
-        return jsonify(publication), 200
-        
-    except Exception as e:
-        logger.error(f"Error getting publication details: {str(e)}")
-        return jsonify({'error': 'An error occurred while retrieving publication details'}), 500
-
-@app.route('/api/publication/<publication_id>/citations', methods=['GET'])
-def get_publication_citations(publication_id):
-    """Get citations for a specific publication"""
-    try:
-        # In a real implementation, you would fetch actual citation data
-        # Here we're returning a placeholder
-        citations = [
-            {
-                "id": f"citation_{i}",
-                "title": f"Citation Publication {i}",
-                "authors": ["Author A", "Author B"],
-                "journal": "Journal of Citations",
-                "publication_date": "2024-01-01",
-                "excerpt": "This is a citation excerpt referencing the original publication."
-            }
-            for i in range(1, 4)
-        ]
-        
-        return jsonify(citations), 200
-        
-    except Exception as e:
-        logger.error(f"Error getting publication citations: {str(e)}")
-        return jsonify({'error': 'An error occurred while retrieving citations'}), 500
-
-@app.route('/api/publication/<publication_id>/similar', methods=['GET'])
-def get_similar_publications(publication_id):
-    """Get publications similar to the specified publication"""
-    try:
-        # Get similar publications
-        similar_publications = literature_searcher.get_similar_publications(
-            publication_id,
-            max_results=5
+        # Update average response time
+        elapsed_time = time.time() - start_time
+        request_stats['average_response_time'] = (
+            (request_stats['average_response_time'] * (request_stats['total_requests'] - 1) + elapsed_time) / 
+            request_stats['total_requests']
         )
         
-        return jsonify(similar_publications), 200
+        # Add response time to result
+        result['response_time'] = elapsed_time
+        
+        return jsonify(result)
         
     except Exception as e:
-        logger.error(f"Error getting similar publications: {str(e)}")
-        return jsonify({'error': 'An error occurred while retrieving similar publications'}), 500
+        logger.exception(f"Error processing search request: {str(e)}")
+        request_stats['failed_requests'] += 1
+        return jsonify({
+            'status': 'error',
+            'message': f'An error occurred while processing your request: {str(e)}'
+        }), 500
 
-@app.route('/api/search_by_keywords', methods=['POST'])
-def search_by_keywords():
-    """Search for publications by keywords"""
+@app.route('/api/advanced-search', methods=['POST'])
+def advanced_search():
+    """
+    Advanced search endpoint with explicit parameters
+    
+    Expects JSON with:
+    - research_areas: List of research areas or fields
+    - specific_topics: Optional list of specific research topics
+    - methodologies: Optional list of methodologies or techniques
+    - options: Optional parameters for search customization
+    """
+    start_time = time.time()
+    request_stats['total_requests'] += 1
+    
     try:
-        # Get search parameters from request
+        # Get request data
         data = request.json
-        if not data or 'keywords' not in data:
-            return jsonify({'error': 'Missing keywords'}), 400
+        if not data or 'research_areas' not in data:
+            request_stats['failed_requests'] += 1
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing research_areas parameter'
+            }), 400
         
-        # Extract parameters
-        keywords = data['keywords']
-        from_year = data.get('from_year')
-        to_year = data.get('to_year')
-        max_results = data.get('max_results', 20)
+        research_areas = data['research_areas']
+        specific_topics = data.get('specific_topics', [])
+        methodologies = data.get('methodologies', [])
+        options = data.get('options', {})
         
-        # Search for publications
-        publications = literature_searcher.search_by_keywords(
-            keywords=keywords,
+        # Extract search parameters
+        max_results = min(options.get('max_results', Config.MAX_RESULTS), 50)
+        from_year = options.get('from_year')
+        to_year = options.get('to_year')
+        analyze_results = options.get('analyze_results', True)
+        
+        # Perform advanced search
+        searcher = get_literature_searcher()
+        result = searcher.advanced_search(
+            research_areas=research_areas,
+            specific_topics=specific_topics,
+            methodologies=methodologies,
             max_results=max_results,
             from_year=from_year,
-            to_year=to_year
+            to_year=to_year,
+            analyze_results=analyze_results
         )
         
-        return jsonify(publications), 200
+        # Log results
+        if result['status'] == 'success':
+            logger.info(
+                f"Advanced search successful: '{', '.join(research_areas[:3])}...' - Found {len(result.get('results', []))} results"
+            )
+            request_stats['successful_requests'] += 1
+        else:
+            logger.error(f"Advanced search failed: '{', '.join(research_areas[:3])}...' - {result.get('message', 'Unknown error')}")
+            request_stats['failed_requests'] += 1
+        
+        # Update average response time
+        elapsed_time = time.time() - start_time
+        request_stats['average_response_time'] = (
+            (request_stats['average_response_time'] * (request_stats['total_requests'] - 1) + elapsed_time) / 
+            request_stats['total_requests']
+        )
+        
+        # Add response time to result
+        result['response_time'] = elapsed_time
+        
+        return jsonify(result)
         
     except Exception as e:
-        logger.error(f"Error searching by keywords: {str(e)}")
-        return jsonify({'error': 'An error occurred while searching by keywords'}), 500
+        logger.exception(f"Error processing advanced search request: {str(e)}")
+        request_stats['failed_requests'] += 1
+        return jsonify({
+            'status': 'error',
+            'message': f'An error occurred while processing your request: {str(e)}'
+        }), 500
 
+@app.route('/api/interdisciplinary-search', methods=['POST'])
+def interdisciplinary_search():
+    """
+    Specialized search for interdisciplinary research
+    
+    Expects JSON with:
+    - primary_discipline: Main research discipline
+    - secondary_disciplines: List of related disciplines to find intersections with
+    - options: Optional parameters for search customization
+    """
+    start_time = time.time()
+    request_stats['total_requests'] += 1
+    
+    try:
+        # Get request data
+        data = request.json
+        if not data or 'primary_discipline' not in data or 'secondary_disciplines' not in data:
+            request_stats['failed_requests'] += 1
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing required parameters (primary_discipline and/or secondary_disciplines)'
+            }), 400
+        
+        primary_discipline = data['primary_discipline']
+        secondary_disciplines = data['secondary_disciplines']
+        options = data.get('options', {})
+        
+        # Extract search parameters
+        max_results = min(options.get('max_results', Config.MAX_RESULTS), 50)
+        from_year = options.get('from_year')
+        recent_years = options.get('recent_years', 5)
+        
+        # Perform interdisciplinary search
+        searcher = get_literature_searcher()
+        result = searcher.interdisciplinary_search(
+            primary_discipline=primary_discipline,
+            secondary_disciplines=secondary_disciplines,
+            max_results=max_results,
+            from_year=from_year,
+            recent_years=recent_years
+        )
+        
+        # Log results
+        if result['status'] == 'success':
+            logger.info(
+                f"Interdisciplinary search successful: '{primary_discipline} + {len(secondary_disciplines)} others' - Found {len(result.get('results', []))} results"
+            )
+            request_stats['successful_requests'] += 1
+        else:
+            logger.error(f"Interdisciplinary search failed: '{primary_discipline}' - {result.get('message', 'Unknown error')}")
+            request_stats['failed_requests'] += 1
+        
+        # Update average response time
+        elapsed_time = time.time() - start_time
+        request_stats['average_response_time'] = (
+            (request_stats['average_response_time'] * (request_stats['total_requests'] - 1) + elapsed_time) / 
+            request_stats['total_requests']
+        )
+        
+        # Add response time to result
+        result['response_time'] = elapsed_time
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.exception(f"Error processing interdisciplinary search request: {str(e)}")
+        request_stats['failed_requests'] += 1
+        return jsonify({
+            'status': 'error',
+            'message': f'An error occurred while processing your request: {str(e)}'
+        }), 500
+
+@app.route('/api/publication/<publication_id>', methods=['GET'])
+def get_publication_details(publication_id):
+    """
+    Get detailed information about a specific publication
+    
+    Args:
+        publication_id: Publication identifier
+    """
+    start_time = time.time()
+    request_stats['total_requests'] += 1
+    
+    try:
+        # Validate publication ID
+        if not publication_id:
+            request_stats['failed_requests'] += 1
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing publication ID'
+            }), 400
+        
+        # Get publication details
+        searcher = get_literature_searcher()
+        result = searcher.get_publication_details(publication_id)
+        
+        # Log results
+        if result['status'] == 'success':
+            logger.info(f"Publication details successful: '{publication_id}'")
+            request_stats['successful_requests'] += 1
+        else:
+            logger.error(f"Publication details failed: '{publication_id}' - {result.get('message', 'Unknown error')}")
+            request_stats['failed_requests'] += 1
+        
+        # Update average response time
+        elapsed_time = time.time() - start_time
+        request_stats['average_response_time'] = (
+            (request_stats['average_response_time'] * (request_stats['total_requests'] - 1) + elapsed_time) / 
+            request_stats['total_requests']
+        )
+        
+        # Add response time to result
+        result['response_time'] = elapsed_time
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.exception(f"Error getting publication details: {str(e)}")
+        request_stats['failed_requests'] += 1
+        return jsonify({
+            'status': 'error',
+            'message': f'An error occurred while retrieving publication details: {str(e)}',
+            'publication_id': publication_id
+        }), 500
+
+@app.route('/api/process-query', methods=['POST'])
+def process_query():
+    """
+    Process a research query without performing a search
+    
+    Expects JSON with:
+    - query: Natural language query to process
+    """
+    start_time = time.time()
+    request_stats['total_requests'] += 1
+    
+    try:
+        # Get request data
+        data = request.json
+        if not data or 'query' not in data:
+            request_stats['failed_requests'] += 1
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing query parameter'
+            }), 400
+        
+        query = data['query']
+        
+        # Process query
+        searcher = get_literature_searcher()
+        structured_query = searcher.query_processor.process_query(query)
+        
+        # Log results
+        logger.info(f"Query processing successful: '{query[:50]}...'")
+        request_stats['successful_requests'] += 1
+        
+        # Update average response time
+        elapsed_time = time.time() - start_time
+        request_stats['average_response_time'] = (
+            (request_stats['average_response_time'] * (request_stats['total_requests'] - 1) + elapsed_time) / 
+            request_stats['total_requests']
+        )
+        
+        return jsonify({
+            'status': 'success',
+            'original_query': query,
+            'structured_query': structured_query,
+            'response_time': elapsed_time
+        })
+        
+    except Exception as e:
+        logger.exception(f"Error processing query: {str(e)}")
+        request_stats['failed_requests'] += 1
+        return jsonify({
+            'status': 'error',
+            'message': f'An error occurred while processing your query: {str(e)}'
+        }), 500
+
+# Error handlers
+@app.errorhandler(404)
+def not_found(error):
+    """Handle 404 errors"""
+    return jsonify({
+        'status': 'error',
+        'message': 'Resource not found'
+    }), 404
+
+@app.errorhandler(405)
+def method_not_allowed(error):
+    """Handle 405 errors"""
+    return jsonify({
+        'status': 'error',
+        'message': 'Method not allowed'
+    }), 405
+
+@app.errorhandler(408)
+def request_timeout(error):
+    """Handle 408 errors"""
+    return jsonify({
+        'status': 'error',
+        'message': 'Request timeout'
+    }), 408
+
+@app.errorhandler(500)
+def server_error(error):
+    """Handle 500 errors"""
+    return jsonify({
+        'status': 'error',
+        'message': 'Internal server error'
+    }), 500
+
+# Application initialization
+def initialize_app():
+    """Initialize the application"""
+    try:
+        # Validate configuration
+        Config.validate()
+        
+        # Initialize literature searcher (this will initialize all other components)
+        get_literature_searcher()
+        
+        logger.info("Application initialized successfully")
+        return True
+    except Exception as e:
+        logger.error(f"Error initializing application: {str(e)}")
+        return False
+
+# Main entry point
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    if initialize_app():
+        logger.info(f"Starting server on {Config.HOST}:{Config.PORT} (Debug: {Config.DEBUG})")
+        app.run(debug=Config.DEBUG, host=Config.HOST, port=Config.PORT)
+    else:
+        logger.error("Failed to initialize application. Exiting.")
