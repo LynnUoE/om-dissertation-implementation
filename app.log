@@ -1,0 +1,42 @@
+2025-03-01 11:41:42,045 - __main__ - WARNING - OPENAI_API_KEY not found in environment variables
+2025-03-01 11:41:42,045 - __main__ - WARNING - RESEARCHER_EMAIL not found in environment variables
+2025-03-01 11:43:40,087 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.103:5000
+2025-03-01 11:43:40,087 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-03-01 11:43:40,097 - werkzeug - INFO -  * Restarting with stat
+2025-03-01 11:43:41,935 - werkzeug - WARNING -  * Debugger is active!
+2025-03-01 11:43:41,950 - werkzeug - INFO -  * Debugger PIN: 829-191-948
+2025-03-01 12:43:12,222 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.103:5000
+2025-03-01 12:43:12,223 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-03-01 12:43:12,225 - werkzeug - INFO -  * Restarting with stat
+2025-03-01 12:43:14,097 - werkzeug - WARNING -  * Debugger is active!
+2025-03-01 12:43:14,115 - werkzeug - INFO -  * Debugger PIN: 829-191-948
+2025-03-01 13:00:17,213 - werkzeug - INFO - 127.0.0.1 - - [01/Mar/2025 13:00:17] "[33mGET / HTTP/1.1[0m" 404 -
+2025-03-01 13:00:17,301 - werkzeug - INFO - 127.0.0.1 - - [01/Mar/2025 13:00:17] "[33mGET /favicon.ico HTTP/1.1[0m" 404 -
+2025-03-14 07:16:16,943 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.103:5000
+2025-03-14 07:16:16,943 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-03-14 07:16:16,951 - werkzeug - INFO -  * Restarting with stat
+2025-03-14 07:16:18,711 - werkzeug - WARNING -  * Debugger is active!
+2025-03-14 07:16:18,739 - werkzeug - INFO -  * Debugger PIN: 829-191-948
+2025-03-14 08:19:41,231 - werkzeug - INFO -  * Detected change in 'd:\\UoE\\Informatics\\Year4\\Dissertation\\OpenOpportunity\\My implementation\\My-dissertation-implementation\\backend\\app.py', reloading
+2025-03-14 08:19:41,376 - werkzeug - INFO -  * Restarting with stat
+2025-03-14 08:22:11,938 - werkzeug - INFO - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:5000
+ * Running on http://192.168.1.103:5000
+2025-03-14 08:22:11,938 - werkzeug - INFO - [33mPress CTRL+C to quit[0m
+2025-03-14 08:22:11,940 - werkzeug - INFO -  * Restarting with stat
+2025-03-14 08:22:13,679 - werkzeug - WARNING -  * Debugger is active!
+2025-03-14 08:22:13,693 - werkzeug - INFO -  * Debugger PIN: 829-191-948
+2025-03-14 08:22:30,683 - werkzeug - INFO -  * Detected change in 'd:\\UoE\\Informatics\\Year4\\Dissertation\\OpenOpportunity\\My implementation\\My-dissertation-implementation\\backend\\app.py', reloading
+2025-03-14 08:22:30,750 - werkzeug - INFO -  * Restarting with stat
+2025-03-14 08:22:32,505 - werkzeug - WARNING -  * Debugger is active!
+2025-03-14 08:22:32,519 - werkzeug - INFO -  * Debugger PIN: 829-191-948

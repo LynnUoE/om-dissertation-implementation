@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Literature Search Results</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/results.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <h1>LitFinder</h1>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="#">About</a></li>
+                    <li><a href="#">Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="results-header">
+            <div class="container">
+                <div class="query-summary">
+                    <h1>Search Results</h1>
+                    <div class="query-details">
+                        <div id="query-text">
+                            <h3>Your Query:</h3>
+                            <p id="original-query">Quantum computing with applications in machine learning...</p>
+                        </div>
+                        <div class="query-analysis">
+                            <div class="analysis-section">
+                                <h3>Research Areas:</h3>
+                                <div id="research-areas-tags" class="tags-container">
+                                    <span class="tag">Quantum Computing</span>
+                                    <span class="tag">Machine Learning</span>
+                                </div>
+                            </div>
+                            <div class="analysis-section">
+                                <h3>Key Topics:</h3>
+                                <div id="expertise-tags" class="tags-container">
+                                    <span class="tag">Quantum Error Correction</span>
+                                    <span class="tag">Superconducting Qubits</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="search-actions">
+                        <button id="modify-search" class="btn btn-secondary">
+                            <i class="fas fa-edit"></i> Modify Search
+                        </button>
+                        <div class="filter-options">
+                            <label for="sort-results">Sort by:</label>
+                            <select id="sort-results">
+                                <option value="relevance">Relevance</option>
+                                <option value="citations">Citation Count</option>
+                                <option value="recency">Most Recent</option>
+                                <option value="oldest">Oldest First</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="results-section">
+            <div class="container">
+                <div class="results-container">
+                    <div class="results-sidebar">
+                        <div class="filter-section">
+                            <h3>Filter Results</h3>
+                            <div class="filter-group">
+                                <h4>Publication Type</h4>
+                                <div class="checkbox-group">
+                                    <label><input type="checkbox" checked> Journal Articles</label>
+                                    <label><input type="checkbox" checked> Conference Papers</label>
+                                    <label><input type="checkbox" checked> Reviews</label>
+                                    <label><input type="checkbox" checked> Book Chapters</label>
+                                    <label><input type="checkbox" checked> Preprints</label>
+                                </div>
+                            </div>
+                            <div class="filter-group">
+                                <h4>Publication Year</h4>
+                                <div class="range-slider">
+                                    <input type="range" min="2000" max="2025" value="2000" id="year-filter">
+                                    <div class="range-values">
+                                        <span id="min-year-value">2000</span>
+                                        <span>2025</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="filter-group">
+                                <h4>Citations</h4>
+                                <div class="range-slider">
+                                    <input type="range" min="0" max="500" value="0" id="citations-filter">
+                                    <div class="range-values">
+                                        <span id="min-citations-value">0</span>
+                                        <span>500+</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="filter-group">
+                                <h4>Open Access</h4>
+                                <div class="checkbox-group">
+                                    <label><input type="checkbox"> Open Access Only</label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="results-list">
+                        <div id="results-count">
+                            <p>Showing <span>24</span> matching publications</p>
+                        </div>
+                        
+                        <div id="publications-container">
+                            <!-- Publication cards will be dynamically generated here -->
+                            <!-- Sample publication card -->
+                            <div class="publication-card">
+                                <div class="publication-info">
+                                    <h3 class="publication-title">Advances in Quantum Error Correction for Superconducting Qubits</h3>
+                                    <p class="publication-authors">Johnson, S., Wilson, D., Chen, E.</p>
+                                    <p class="publication-source">
+                                        <span class="journal-name">Nature Quantum Information</span>, 
+                                        <span class="publication-year">2023</span>
+                                    </p>
+                                    <div class="publication-metrics">
+                                        <span><i class="fas fa-quote-right"></i> 145 Citations</span>
+                                        <span><i class="fas fa-book"></i> Journal Article</span>
+                                    </div>
+                                    <div class="publication-abstract">
+                                        <p>This paper presents a novel approach to quantum error correction that improves error thresholds for superconducting qubit architectures by 35% compared to previous methods...</p>
+                                    </div>
+                                    <div class="relevance-match">
+                                        <h4>Topic Match:</h4>
+                                        <div class="match-bars">
+                                            <div class="match-item">
+                                                <span>Quantum Error Correction</span>
+                                                <div class="progress-bar">
+                                                    <div class="progress" style="width: 95%"></div>
+                                                </div>
+                                                <span>95%</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="publication-actions">
+                                    <a href="publication.html?id=12345" class="btn btn-primary">View Details</a>
+                                    <button class="btn btn-outline"><i class="fas fa-bookmark"></i> Save</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Second sample publication card -->
+                            <div class="publication-card">
+                                <div class="publication-info">
+                                    <h3 class="publication-title">Quantum Machine Learning Applications in Near-Term Quantum Computers</h3>
+                                    <p class="publication-authors">Taylor, R., Martinez, J., Johnson, S.</p>
+                                    <p class="publication-source">
+                                        <span class="journal-name">Science</span>, 
+                                        <span class="publication-year">2022</span>
+                                    </p>
+                                    <div class="publication-metrics">
+                                        <span><i class="fas fa-quote-right"></i> 203 Citations</span>
+                                        <span><i class="fas fa-book"></i> Journal Article</span>
+                                    </div>
+                                    <div class="publication-abstract">
+                                        <p>A comprehensive review of quantum machine learning algorithms that can be implemented on current and near-term quantum computing hardware, with emphasis on practical applications...</p>
+                                    </div>
+                                    <div class="relevance-match">
+                                        <h4>Topic Match:</h4>
+                                        <div class="match-bars">
+                                            <div class="match-item">
+                                                <span>Quantum Machine Learning</span>
+                                                <div class="progress-bar">
+                                                    <div class="progress" style="width: 88%"></div>
+                                                </div>
+                                                <span>88%</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="publication-actions">
+                                    <a href="publication.html?id=67890" class="btn btn-primary">View Details</a>
+                                    <button class="btn btn-outline"><i class="fas fa-bookmark"></i> Save</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="pagination">
+                            <button class="btn btn-pagination" disabled><i class="fas fa-chevron-left"></i></button>
+                            <span class="pagination-info">Page 1 of 3</span>
+                            <button class="btn btn-pagination"><i class="fas fa-chevron-right"></i></button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 LitFinder. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+    <script src="js/results-handler.js"></script>
+</body>
+</html>

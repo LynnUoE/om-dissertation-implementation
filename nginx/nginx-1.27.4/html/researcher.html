@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Researcher Profile | ResearchMatch</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/researcher.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <h1>ResearchMatch</h1>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="#">About</a></li>
+                    <li><a href="#">Contact</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section class="researcher-header">
+            <div class="container">
+                <a href="results.html" class="back-link"><i class="fas fa-arrow-left"></i> Back to results</a>
+                
+                <div class="researcher-profile">
+                    <div class="researcher-primary-info">
+                        <h1 id="researcher-name">Dr. Sarah Johnson</h1>
+                        <p id="researcher-institution">Stanford University, Department of Physics</p>
+                        <div class="researcher-metrics">
+                            <div class="metric">
+                                <i class="fas fa-quote-right"></i>
+                                <div class="metric-data">
+                                    <span class="metric-value">1,245</span>
+                                    <span class="metric-label">Citations</span>
+                                </div>
+                            </div>
+                            <div class="metric">
+                                <i class="fas fa-file-alt"></i>
+                                <div class="metric-data">
+                                    <span class="metric-value">78</span>
+                                    <span class="metric-label">Publications</span>
+                                </div>
+                            </div>
+                            <div class="metric">
+                                <i class="fas fa-chart-line"></i>
+                                <div class="metric-data">
+                                    <span class="metric-value">24</span>
+                                    <span class="metric-label">h-index</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="collaboration-info">
+                        <div class="match-summary">
+                            <h3>Match Summary</h3>
+                            <div class="match-score">
+                                <div class="score-circle">
+                                    <span>92%</span>
+                                </div>
+                                <span class="match-label">Overall Match</span>
+                            </div>
+                        </div>
+                        <div class="collab-actions">
+                            <button class="btn btn-primary"><i class="fas fa-envelope"></i> Contact Researcher</button>
+                            <button class="btn btn-outline"><i class="fas fa-bookmark"></i> Save Profile</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="researcher-details">
+            <div class="container">
+                <div class="details-sidebar">
+                    <div class="sidebar-section">
+                        <h3>Research Expertise</h3>
+                        <div id="expertise-breakdown">
+                            <div class="expertise-item">
+                                <div class="expertise-header">
+                                    <span>Quantum Computing</span>
+                                    <span class="expertise-score">95%</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress" style="width: 95%"></div>
+                                </div>
+                            </div>
+                            <div class="expertise-item">
+                                <div class="expertise-header">
+                                    <span>Quantum Error Correction</span>
+                                    <span class="expertise-score">88%</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress" style="width: 88%"></div>
+                                </div>
+                            </div>
+                            <div class="expertise-item">
+                                <div class="expertise-header">
+                                    <span>Superconducting Qubits</span>
+                                    <span class="expertise-score">76%</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress" style="width: 76%"></div>
+                                </div>
+                            </div>
+                            <div class="expertise-item">
+                                <div class="expertise-header">
+                                    <span>Quantum Machine Learning</span>
+                                    <span class="expertise-score">71%</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress" style="width: 71%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="sidebar-section">
+                        <h3>Collaboration Potential</h3>
+                        <div class="collaboration-assessment">
+                            <p>Dr. Johnson's research focus aligns strongly with your interests in quantum computing and error correction techniques. Her recent work on superconducting qubit architectures would complement your research goals.</p>
+                            <div class="collab-recommendation">
+                                <span class="recommendation-label">Recommendation:</span>
+                                <span class="recommendation-value high">High Priority</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="sidebar-section">
+                        <h3>Research Network</h3>
+                        <div class="network-visualization">
+                            <!-- Placeholder for network visualization -->
+                            <div class="network-placeholder">
+                                <i class="fas fa-project-diagram"></i>
+                                <span>Research network visualization</span>
+                            </div>
+                        </div>
+                        <div class="top-collaborators">
+                            <h4>Top Collaborators</h4>
+                            <ul class="collaborator-list">
+                                <li>Prof. David Wilson (MIT)</li>
+                                <li>Dr. Emily Chen (Stanford)</li>
+                                <li>Prof. Robert Taylor (Berkeley)</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="details-main">
+                    <div class="tabs-container">
+                        <div class="tabs">
+                            <button class="tab-btn active" data-tab="publications">Publications</button>
+                            <button class="tab-btn" data-tab="research-areas">Research Areas</button>
+                            <button class="tab-btn" data-tab="institutions">Affiliations</button>
+                        </div>
+                        
+                        <div class="tab-content active" id="publications-tab">
+                            <div class="tab-header">
+                                <h2>Key Publications</h2>
+                                <div class="tab-actions">
+                                    <select id="pub-sort">
+                                        <option value="citations">Most Cited</option>
+                                        <option value="recent">Most Recent</option>
+                                        <option value="relevance">Most Relevant</option>
+                                    </select>
+                                </div>
+                            </div>
+                            
+                            <div class="publications-list">
+                                <div class="publication-item">
+                                    <div class="pub-citation">
+                                        <h3 class="pub-title">Advances in Quantum Error Correction for Superconducting Qubits</h3>
+                                        <p class="pub-authors">Johnson, S., Wilson, D., Chen, E.</p>
+                                        <p class="pub-journal"><span class="journal-name">Nature Quantum Information</span>, 2023</p>
+                                    </div>
+                                    <div class="pub-metrics">
+                                        <span class="citation-count"><i class="fas fa-quote-right"></i> 145</span>
+                                        <span class="relevance-badge high">92% Relevant</span>
+                                    </div>
+                                    <div class="pub-abstract">
+                                        <p>This paper presents a novel approach to quantum error correction that improves error thresholds for superconducting qubit architectures by 35% compared to previous methods.</p>
+                                    </div>
+                                    <div class="pub-actions">
+                                        <a href="#" class="btn btn-sm btn-outline"><i class="fas fa-external-link-alt"></i> View Paper</a>
+                                    </div>
+                                </div>
+                                
+                                <div class="publication-item">
+                                    <div class="pub-citation">
+                                        <h3 class="pub-title">Quantum Machine Learning Applications in Near-Term Quantum Computers</h3>
+                                        <p class="pub-authors">Johnson, S., Taylor, R., Martinez, J.</p>
+                                        <p class="pub-journal"><span class="journal-name">Science</span>, 2022</p>
+                                    </div>
+                                    <div class="pub-metrics">
+                                        <span class="citation-count"><i class="fas fa-quote-right"></i> 203</span>
+                                        <span class="relevance-badge medium">78% Relevant</span>
+                                    </div>
+                                    <div class="pub-abstract">
+                                        <p>A comprehensive review of quantum machine learning algorithms that can be implemented on current and near-term quantum computing hardware, with emphasis on practical applications.</p>
+                                    </div>
+                                    <div class="pub-actions">
+                                        <a href="#" class="btn btn-sm btn-outline"><i class="fas fa-external-link-alt"></i> View Paper</a>
+                                    </div>
+                                </div>
+                                
+                                <div class="publication-item">
+                                    <div class="pub-citation">
+                                        <h3 class="pub-title">Fault-Tolerant Quantum Computing: Progress and Challenges</h3>
+                                        <p class="pub-authors">Wilson, D., Johnson, S., Brown, E.</p>
+                                        <p class="pub-journal"><span class="journal-name">Physical Review Letters</span>, 2021</p>
+                                    </div>
+                                    <div class="pub-metrics">
+                                        <span class="citation-count"><i class="fas fa-quote-right"></i> 187</span>
+                                        <span class="relevance-badge high">85% Relevant</span>
+                                    </div>
+                                    <div class="pub-abstract">
+                                        <p>This work addresses the key challenges in achieving fault-tolerant quantum computation and proposes new methods for qubit connectivity and error suppression in large-scale quantum systems.</p>
+                                    </div>
+                                    <div class="pub-actions">
+                                        <a href="#" class="btn btn-sm btn-outline"><i class="fas fa-external-link-alt"></i> View Paper</a>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="see-more">
+                                <button class="btn btn-outline">See All Publications <i class="fas fa-chevron-down"></i></button>
+                            </div>
+                        </div>
+                        
+                        <div class="tab-content" id="research-areas-tab">
+                            <!-- Content for Research Areas tab -->
+                            <h2>Research Areas</h2>
+                            <div class="research-areas-content">
+                                <div class="research-timeline">
+                                    <h3>Research Evolution</h3>
+                                    <div class="timeline-visualization">
+                                        <!-- Placeholder for research evolution timeline -->
+                                        <div class="timeline-placeholder">
+                                            <span>Research focus timeline visualization</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="keyword-cloud">
+                                    <h3>Key Research Terms</h3>
+                                    <div class="keywords">
+                                        <span class="keyword large">Quantum Computing</span>
+                                        <span class="keyword medium">Superconducting Qubits</span>
+                                        <span class="keyword large">Quantum Error Correction</span>
+                                        <span class="keyword small">Quantum Supremacy</span>
+                                        <span class="keyword medium">Quantum Machine Learning</span>
+                                        <span class="keyword small">Quantum Algorithms</span>
+                                        <span class="keyword medium">Quantum Information</span>
+                                        <span class="keyword small">Quantum Gates</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="tab-content" id="institutions-tab">
+                            <!-- Content for Institutions tab -->
+                            <h2>Academic Affiliations</h2>
+                            <div class="institutions-content">
+                                <div class="institution-item">
+                                    <div class="institution-info">
+                                        <h3>Stanford University</h3>
+                                        <p class="institution-role">Associate Professor, Department of Physics</p>
+                                        <p class="institution-period">2018 - Present</p>
+                                    </div>
+                                    <p class="institution-details">
+                                        Leading the Quantum Information and Computation Lab, focusing on experimental implementations of quantum error correction and fault-tolerant quantum computation.
+                                    </p>
+                                </div>
+                                
+                                <div class="institution-item">
+                                    <div class="institution-info">
+                                        <h3>MIT</h3>
+                                        <p class="institution-role">Assistant Professor, Department of Physics</p>
+                                        <p class="institution-period">2012 - 2018</p>
+                                    </div>
+                                    <p class="institution-details">
+                                        Established the Quantum Computing Theory Group focusing on quantum error correction protocols and algorithm development for noisy intermediate-scale quantum devices.
+                                    </p>
+                                </div>
+                                
+                                <div class="institution-item">
+                                    <div class="institution-info">
+                                        <h3>IBM Quantum</h3>
+                                        <p class="institution-role">Research Scientist</p>
+                                        <p class="institution-period">2010 - 2012</p>
+                                    </div>
+                                    <p class="institution-details">
+                                        Contributed to the development of IBM's superconducting qubit architecture and implementation of the first quantum error correction protocols on hardware.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 ResearchMatch. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+    <script src="js/researcher-view.js"></script>
+</body>
+</html>
