@@ -262,9 +262,7 @@ To test the full frontend-backend integration:
 4. Test the following workflows:
    - Simple search from the home page
    - Advanced search with research areas and topics
-   - Interdisciplinary search
    - Viewing publication details
-   - Saving publications
 
 
 ## Troubleshooting
