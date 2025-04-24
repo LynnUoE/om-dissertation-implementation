@@ -244,7 +244,7 @@ The frontend can be developed independently from the backend by ensuring the API
    const API_BASE_URL = 'http://localhost:5000/api';
    ```
 
-2. Access the frontend at http://localhost:8080
+2. Access the frontend at http://localhost
 
 ## Integration Testing
 
