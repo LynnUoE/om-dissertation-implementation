@@ -23,14 +23,12 @@ The system follows a service-oriented architecture with:
 - Python 3.12+
 - Nginx
 - OpenAI API key
-- NodeJS (optional, for development tools)
 
 ### Backend Setup
 
 1. Clone the repository
    ```
-   git clone https://github.com/yourusername/litfinder.git
-   cd litfinder
+   git clone https://github.com/LynnUoE/om-dissertation-implementation.git
    ```
 
 2. Create a virtual environment
@@ -47,7 +45,7 @@ The system follows a service-oriented architecture with:
 4. Create a `.env` file in the root directory with the following variables:
    ```
    OPENAI_API_KEY=your_openai_api_key
-   RESEARCHER_EMAIL=your_email@example.com  # Used for OpenAlex API identification
+   RESEARCHER_EMAIL=your_email@example.com 
    STATIC_FOLDER=../frontend
    DEBUG=True  # Set to False in production
    HOST=0.0.0.0
@@ -184,28 +182,28 @@ http {
 ## Project Structure
 
 ```
-litfinder/
+backend/
 ├── api_server.py               # Main Flask API server
 ├── query_processor.py          # Natural language query processing
 ├── literature_searcher.py      # Publication search functionality
 ├── openalex_client.py          # Interface to OpenAlex API
 ├── research_analyzer.py        # Publication analysis functionality
 ├── requirements.txt            # Python dependencies
-├── .env                        # Environment variables (not in repo)
-└── frontend/                   # Static frontend files
-    ├── index.html              # Home page with search form
-    ├── result.html             # Search results page
-    ├── publication.html        # Publication details page
-    ├── css/                    # Stylesheets
-    │   ├── style.css           # Global styles
-    │   ├── result.css          # Results page styles
-    │   └── publication.css     # Publication page styles
-    └── js/                     # JavaScript files
-        ├── main.js             # Common functionality
-        ├── api-service.js      # API communication service
-        ├── query-processor.js  # Frontend query handling
-        ├── result-handler.js   # Results page script
-        └── publication-view.js # Publication details script
+└── .env                        # Environment variables (not in repo)
+frontend/                   # Static frontend files
+├── index.html              # Home page with search form
+├── result.html             # Search results page
+├── publication.html        # Publication details page
+├── css/                    # Stylesheets
+│   ├── style.css           # Global styles
+│   ├── result.css          # Results page styles
+│   └── publication.css     # Publication page styles
+└── js/                     # JavaScript files
+     ├── main.js             # Common functionality
+     ├── api-service.js      # API communication service
+     ├── query-processor.js  # Frontend query handling
+     ├── result-handler.js   # Results page script
+     └── publication-view.js # Publication details script
 ```
 
 ## API Endpoints
