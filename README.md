@@ -42,14 +42,15 @@ The system follows a service-oriented architecture with:
    pip install -r requirements.txt
    ```
 
-4. Create a `.env` file in the root directory with the following variables:
+4. Edit the  `.env` file in the backend directory with the following variables:
    ```
    OPENAI_API_KEY=your_openai_api_key
    RESEARCHER_EMAIL=your_email@example.com 
    STATIC_FOLDER=../frontend
    DEBUG=True  # Set to False in production
-   HOST=0.0.0.0
-   PORT=5000
+   # Flask Configuration
+   FLASK_ENV=development
+   FLASK_DEBUG=1
    ```
 
 5. Run the backend server
