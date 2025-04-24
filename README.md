@@ -68,23 +68,108 @@ The frontend is static HTML, CSS, and JavaScript that can be served directly by 
 Create a configuration file at `/etc/nginx/sites-available/litfinder.conf` (Linux) or in your Nginx configuration directory (Windows):
 
 ```nginx
-server {
-    listen 80;
-    server_name localhost;  # Replace with your domain in production
+worker_processes 1;
 
-    # Serve static frontend files
-    location / {
-        root /path/to/litfinder/frontend;  # Update with your actual path
-        index index.html;
-        try_files $uri $uri/ /index.html;
-    }
+events {
+    worker_connections 1024;
+}
 
-    # Proxy API requests to the Flask backend
-    location /api/ {
-        proxy_pass http://127.0.0.1:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+    sendfile      on;
+    keepalive_timeout 65;
+    
+    # Performance optimizations
+    gzip on;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+    gzip_comp_level 6;
+    client_max_body_size 10M;
+
+    server {
+        listen       80 default_server;
+        server_name  localhost;
+        
+        # Root directory for frontend static files
+        root "path to your frontend";
+        
+        # Main location block for frontend
+        location / {
+            index  index.html;
+            try_files $uri $uri/ /index.html;
+        }
+        
+        # Handle API requests and proxy to Flask backend
+        location /api/ {
+            proxy_pass http://localhost:5000/api/;
+            proxy_http_version 1.1;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_connect_timeout 60s;
+            proxy_read_timeout 120s;
+            proxy_send_timeout 120s;
+            
+            # CORS headers for API requests
+            add_header 'Access-Control-Allow-Origin' '*' always;
+            add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE' always;
+            add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization' always;
+            
+            # Handle OPTIONS method for CORS preflight
+            if ($request_method = 'OPTIONS') {
+                add_header 'Access-Control-Allow-Origin' '*';
+                add_header 'Access-Control-Allow-Methods' 'GET, POST, OPTIONS, PUT, DELETE';
+                add_header 'Access-Control-Allow-Headers' 'DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization';
+                add_header 'Access-Control-Max-Age' 1728000;
+                add_header 'Content-Type' 'text/plain; charset=utf-8';
+                add_header 'Content-Length' 0;
+                return 204;
+            }
+        }
+        
+        # JS files
+        location ~ \.js$ {
+            root "path to your frontend";
+            expires 7d;
+            add_header Cache-Control "public, max-age=604800";
+            add_header Content-Type "application/javascript";
+            try_files $uri =404;
+        }
+        
+        # CSS files
+        location ~ \.css$ {
+            root "path to your frontend";
+            expires 7d;
+            add_header Cache-Control "public, max-age=604800";
+            add_header Content-Type "text/css";
+            try_files $uri =404;
+        }
+        
+        # HTML files
+        location ~ \.html$ {
+            root "path to your frontend";
+            expires -1;
+            add_header Cache-Control "no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0";
+            try_files $uri /index.html;
+        }
+        
+        # Media files
+        location ~* \.(jpg|jpeg|png|gif|ico|svg|woff|woff2|ttf|eot)$ {
+            root "path to your frontend";
+            expires 30d;
+            add_header Cache-Control "public, max-age=2592000";
+            try_files $uri =404;
+        }
+        
+        # Error pages
+        error_page 404 /index.html;
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+            root html;
+        }
     }
 }
 ```
@@ -260,7 +345,7 @@ For production deployment:
 
 5. **Backend Server Errors**
    - Review Flask server logs for error messages
-   - Check environment variable configuration
+   - Check the environment variable configuration
    - Verify Python dependencies are correctly installed
 
 ### Logs
@@ -269,21 +354,6 @@ For production deployment:
 - **Nginx Logs**: `/var/log/nginx/access.log` and `/var/log/nginx/error.log`
 - **Browser Console**: Check for JavaScript errors in the browser developer tools
 
-## Future Work
-
-Potential enhancements for the system:
-
-1. Implement user authentication and saved searches
-2. Add visualization tools for research topics and connections
-3. Incorporate advanced filtering options
-4. Implement citation network analysis
-5. Add export functionality for search results
-6. Develop personalized recommendation features
-7. Implement Retrieval-Augmented Generation (RAG) for improved analysis
-
-## License
-
-[Your license information here]
 
 ## Acknowledgments
 
