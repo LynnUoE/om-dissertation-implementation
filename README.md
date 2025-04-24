@@ -244,13 +244,7 @@ The frontend can be developed independently from the backend by ensuring the API
    const API_BASE_URL = 'http://localhost:5000/api';
    ```
 
-2. For development, you can use a simple HTTP server:
-   ```
-   cd frontend
-   python -m http.server 8080
-   ```
-
-3. Access the frontend at http://localhost:8080
+2. Access the frontend at http://localhost:8080
 
 ## Integration Testing
 
@@ -272,51 +266,6 @@ To test the full frontend-backend integration:
    - Viewing publication details
    - Saving publications
 
-## Deployment
-
-For production deployment:
-
-1. Update the `.env` file with production settings:
-   ```
-   DEBUG=False
-   HOST=0.0.0.0
-   PORT=5000
-   ```
-
-2. Configure a production WSGI server (e.g., Gunicorn):
-   ```
-   pip install gunicorn
-   gunicorn -w 4 -b 0.0.0.0:5000 api_server:app
-   ```
-
-3. Configure Nginx with HTTPS:
-   ```nginx
-   server {
-       listen 443 ssl;
-       server_name yourdomain.com;
-       
-       ssl_certificate /path/to/cert.pem;
-       ssl_certificate_key /path/to/key.pem;
-       
-       # Frontend and API proxy configurations as before
-   }
-   ```
-
-4. Set up a systemd service for automatic startup:
-   ```
-   [Unit]
-   Description=LitFinder API Server
-   After=network.target
-
-   [Service]
-   User=www-data
-   WorkingDirectory=/path/to/litfinder
-   ExecStart=/path/to/litfinder/venv/bin/gunicorn -w 4 -b 0.0.0.0:5000 api_server:app
-   Restart=on-failure
-
-   [Install]
-   WantedBy=multi-user.target
-   ```
 
 ## Troubleshooting
 
