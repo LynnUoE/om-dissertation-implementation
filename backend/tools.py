@@ -239,10 +239,13 @@ class ToolExecutor:
         return max(1, min(limit, MAX_LIMIT))
 
     def _remember_papers(self, works: List[Dict]) -> List[Dict]:
-        papers = []
+        papers, titles = [], set()
         for work in works:
-            if not work:
+            # OpenAlex often lists a preprint and its published version as separate works
+            title = (work or {}).get("title") or ""
+            if not work or title.strip().lower() in titles:
                 continue
+            titles.add(title.strip().lower())
             self.seen_papers[_short_id(work.get("id"))] = work
             papers.append(compact_paper(work))
         return papers

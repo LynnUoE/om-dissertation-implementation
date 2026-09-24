@@ -36,7 +36,7 @@ class FakeOpenAlex:
 
     def search_works(self, query="", **kwargs) -> OpenAlexResponse:
         self.calls.append({"method": "search_works", "query": query, **kwargs})
-        return OpenAlexResponse(200, {"results": self.works, "meta": {"count": len(self.works)}})
+        return OpenAlexResponse(200, {"results": self.works}, meta={"count": len(self.works)})
 
     def get_work(self, work_id: str) -> OpenAlexResponse:
         self.calls.append({"method": "get_work", "work_id": work_id})

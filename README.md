@@ -34,6 +34,45 @@ The response includes the tool-call trace and token usage. In the web UI, tick *
 
 All LLM calls go through `backend/llm.py`. Set `LLM_MODEL`, and optionally `LLM_BASE_URL` / `LLM_API_KEY`, to use any OpenAI-compatible provider (e.g. Volcano Engine Ark). If a provider rejects Structured Outputs (`json_schema`), requests fall back to JSON mode, and replies are still validated with Pydantic.
 
+### MCP Server
+
+`backend/mcp_server.py` exposes the same four tools over the [Model Context Protocol](https://modelcontextprotocol.io), so any MCP host (Claude Code, Claude Desktop, ...) can use LitFinder's search. The host's own model does the reasoning, so no LLM key is needed; only `OPENALEX_API_KEY` / `RESEARCHER_EMAIL` from `backend/.env`.
+
+| MCP primitive | Provided |
+|---|---|
+| Tools | `search_papers`, `get_paper`, `search_authors`, `get_author_papers` (all annotated read-only) |
+| Prompts | `literature_review(topic)` |
+
+The tool parameters and descriptions come from the same Pydantic models as the function-calling tools, and a test checks they stay in sync. Tool failures (bad arguments, unknown IDs, OpenAlex errors) return `isError: true` results the model can read.
+
+**Transports**
+
+```
+python backend/mcp_server.py                     # stdio: the host launches it as a subprocess
+python backend/mcp_server.py --transport http    # Streamable HTTP at http://127.0.0.1:8000/mcp
+```
+
+**Claude Code**: the repo's `.mcp.json` registers the server for this project. Open the project in Claude Code and approve `litfinder`, then check it with `claude mcp list`. To use it in every project instead:
+
+```
+claude mcp add litfinder -s user -- /absolute/path/to/.venv/bin/python /absolute/path/to/backend/mcp_server.py
+```
+
+**Claude Desktop**: add this to `~/Library/Application Support/Claude/claude_desktop_config.json` (use absolute paths) and restart the app:
+
+```json
+{
+  "mcpServers": {
+    "litfinder": {
+      "command": "/absolute/path/to/.venv/bin/python",
+      "args": ["/absolute/path/to/backend/mcp_server.py"]
+    }
+  }
+}
+```
+
+**Function calling vs MCP in this project:** with function calling (`/api/agent-search`), this app owns the loop: it sends the tool schemas to the model, executes the calls and feeds results back. With MCP, the host application owns the loop and the model; this server only publishes tools and executes them when the host asks. The same tool code serves both.
+
 ## Setup and Installation
 
 ### Prerequisites
@@ -202,6 +241,7 @@ backend/
 ├── api_server.py               # Main Flask API server
 ├── agent.py                    # Tool-calling research agent
 ├── tools.py                    # Agent tools (schemas + OpenAlex-backed implementations)
+├── mcp_server.py               # MCP server exposing the same tools
 ├── llm.py                      # LLM client config and Structured Outputs helpers
 ├── query_processor.py          # Natural language query processing
 ├── literature_searcher.py      # Publication search functionality
@@ -210,6 +250,7 @@ backend/
 ├── .env.example                # Environment variable template
 └── .env                        # Your local environment variables (git-ignored)
 tests/                      # Offline unit tests (fake LLM and OpenAlex)
+.mcp.json                   # Registers the MCP server for Claude Code in this project
 requirements.txt            # Python dependencies
 requirements-dev.txt        # Test dependencies
 frontend/                   # Static frontend files
