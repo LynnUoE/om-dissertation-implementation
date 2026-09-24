@@ -85,7 +85,8 @@ class OpenAlexResponse:
 class OpenAlexClient:
     """Client for interacting with the OpenAlex API"""
     
-    def __init__(self, email: str, max_retries: int = 3, rate_limit_delay: float = 1.0):
+    def __init__(self, email: str, api_key: Optional[str] = None,
+                 max_retries: int = 3, rate_limit_delay: float = 1.0):
         self.base_url = "https://api.openalex.org"
         self.email = email
         self.max_retries = max_retries
@@ -107,6 +108,7 @@ class OpenAlexClient:
             )
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
+        self.api_key = api_key  # Optional; avoids the anonymous search rate limit
 
     def _make_request(
         self,
@@ -130,10 +132,11 @@ class OpenAlexClient:
                     params=params
                 ).prepare()
                 
-                # Log the full URL with parameters
+                # Log the full URL with parameters (before adding the API key, so it never hits the logs)
                 self.logger.info(f"Making API request: {prepared_request.url}")
                 
-                response = self.session.request(method, url, params=params)
+                request_params = {**params, 'api_key': self.api_key} if self.api_key else params
+                response = self.session.request(method, url, params=request_params)
                 
                 if response.status_code != 200:
                     error_data = response.json() if response.content else {}
@@ -208,6 +211,13 @@ class OpenAlexClient:
         if query:
             params['search'] = query
         
+        # Every attempt was rate limited
+        return OpenAlexResponse(
+            status_code=429,
+            data={},
+            error=f"Rate limit exceeded after {self.max_retries} attempts"
+        )
+        
         # Build filter parts
         filter_parts = []
         
@@ -268,9 +278,9 @@ class OpenAlexClient:
         
         return self._make_request(f'works/{work_id}')
 
-def create_client(email: str) -> OpenAlexClient:
+def create_client(email: str, api_key: Optional[str] = None) -> OpenAlexClient:
     """Factory function to create an OpenAlexClient instance."""
-    return OpenAlexClient(email)
+    return OpenAlexClient(email, api_key)
 
 # Example usage
 if __name__ == "__main__":

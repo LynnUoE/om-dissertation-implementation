@@ -41,7 +41,7 @@ Flask serves the frontend as well as the API, so no Nginx is needed for local de
    pip install -r requirements.txt
    ```
 
-3. Create `backend/.env` from the template and fill in your OpenAI API key
+3. Create `backend/.env` from the template and fill in your OpenAI API key (an optional free [OpenAlex API key](https://openalex.org) avoids OpenAlex's anonymous rate limit)
    ```
    cp backend/.env.example backend/.env
    ```

@@ -22,6 +22,7 @@ class Config:
     """Application configuration"""
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     RESEARCHER_EMAIL = os.getenv("RESEARCHER_EMAIL", "research@example.com")
+    OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")  # Optional
     # Relative paths resolve against this file, so the server can start from any cwd
     STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                  os.getenv("STATIC_FOLDER", "../frontend"))
@@ -61,7 +62,8 @@ def get_literature_searcher() -> LiteratureSearcher:
     if literature_searcher is None:
         literature_searcher = create_literature_searcher(
             Config.OPENAI_API_KEY,
-            Config.RESEARCHER_EMAIL
+            Config.RESEARCHER_EMAIL,
+            Config.OPENALEX_API_KEY
         )
     return literature_searcher
 

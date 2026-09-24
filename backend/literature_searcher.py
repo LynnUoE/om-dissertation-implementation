@@ -41,6 +41,7 @@ class LiteratureSearcher:
         self,
         openai_api_key: str,
         email_for_openalex: str,
+        openalex_api_key: Optional[str] = None,
         cache_duration: int = 24  # Cache duration in hours
     ):
         """
@@ -49,11 +50,12 @@ class LiteratureSearcher:
         Args:
             openai_api_key: API key for OpenAI
             email_for_openalex: Email for OpenAlex API identification
+            openalex_api_key: Optional OpenAlex API key (avoids anonymous rate limits)
             cache_duration: Duration in hours to cache results
         """
         # Initialize components
         self.query_processor = create_query_processor(openai_api_key)
-        self.openalex_client = create_client(email_for_openalex)
+        self.openalex_client = create_client(email_for_openalex, openalex_api_key)
         self.research_analyzer = create_analyzer(openai_api_key)
         self.cache_duration = cache_duration
         
@@ -1245,6 +1247,10 @@ class LiteratureSearcher:
             for key in oldest_keys:
                 del self.result_cache[key]
 
-def create_literature_searcher(openai_api_key: str, email_for_openalex: str) -> LiteratureSearcher:
+def create_literature_searcher(
+    openai_api_key: str,
+    email_for_openalex: str,
+    openalex_api_key: Optional[str] = None
+) -> LiteratureSearcher:
     """Factory function to create a LiteratureSearcher instance"""
-    return LiteratureSearcher(openai_api_key, email_for_openalex)
+    return LiteratureSearcher(openai_api_key, email_for_openalex, openalex_api_key)
