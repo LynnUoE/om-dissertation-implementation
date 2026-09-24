@@ -83,7 +83,13 @@ function initializeQueryForm(form) {
             console.log("Sending search request with options:", searchOptions);
             
             try {
-                const searchResult = await ApiService.searchLiterature(queryData.query, searchOptions);
+                const agentMode = document.getElementById('agent-mode')?.checked;
+                if (agentMode && typeof window.showLoading === 'function') {
+                    window.showLoading("The agent is planning and running searches...");
+                }
+                const searchResult = agentMode
+                    ? await ApiService.agentSearch(queryData.query)
+                    : await ApiService.searchLiterature(queryData.query, searchOptions);
                 
                 // Add validation for search result structure
                 if (!searchResult) {

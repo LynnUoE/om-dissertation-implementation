@@ -1,13 +1,33 @@
-from openai import OpenAI
 from typing import Dict, List, Optional, Any
 import json
 import logging
 from datetime import datetime
 import re
 
+from pydantic import BaseModel, Field
+
+from llm import DEFAULT_LLM_MODEL, create_llm_client, structured_completion
+
+
+class TermExpansion(BaseModel):
+    term: str = Field(description="One of the extracted research areas, topics or methodologies")
+    related_terms: List[str] = Field(description="Alternative phrasings, broader/narrower terms and related concepts")
+
+
+class QueryAnalysis(BaseModel):
+    """Structured Outputs schema for a literature search query"""
+    research_areas: List[str] = Field(description="Broader research fields or disciplines relevant to the query")
+    specific_topics: List[str] = Field(description="Specific research topics, problems or phenomena being investigated")
+    methodologies: List[str] = Field(description="Relevant research methods, approaches or techniques")
+    temporal_context: str = Field(description='Time period or date range mentioned, or "current" if none')
+    search_keywords: List[str] = Field(description="Additional keywords that would help identify relevant literature")
+    expanded_terms: List[TermExpansion] = Field(description="Expansions for the 5 most important extracted terms")
+
+
 class QueryProcessor:
-    def __init__(self, api_key: str):
-        self.client = OpenAI(api_key=api_key)
+    def __init__(self, api_key: str, model: str = DEFAULT_LLM_MODEL, base_url: Optional[str] = None):
+        self.client = create_llm_client(api_key, base_url)
+        self.model = model
         
         # Configure logging
         self.logger = logging.getLogger('QueryProcessor')
@@ -32,31 +52,12 @@ class QueryProcessor:
         - Extract specific methodologies, theories, or techniques mentioned
         - Recognize both technical terminology and general descriptions
         - Identify potential interdisciplinary connections
-        
-        YOU MUST PROVIDE THE RESPONSE AS A VALID JSON OBJECT with these exact keys:
-        - research_areas: list of broader research fields or disciplines relevant to the query
-        - specific_topics: list of specific research topics, problems, or phenomena being investigated
-        - methodologies: list of relevant research methods, approaches, or techniques
-        - temporal_context: any time periods or date ranges mentioned (or "current" if recent research is implied)
-        - search_keywords: additional keywords that would help identify relevant literature
+        - For the 5 most important research areas, topics or methodologies, list alternative phrasings,
+          broader/narrower terms and related concepts that might appear in academic literature
         
         Query: {query}
-        
-        Response (as JSON only):
         """
         
-        # Template for expanding search terms
-        self.expansion_prompt = """
-        For each of the following research terms, provide alternative phrasings, broader/narrower terms, and related concepts that might appear in academic literature on this topic.
-        
-        YOU MUST FORMAT YOUR RESPONSE AS A VALID JSON OBJECT where each key is one of the original terms,
-        and each value is a list of related terms that would help in a literature search.
-        
-        Research terms: {terms}
-        
-        Response (as JSON only):
-        """
-
     def extract_json_from_text(self, text: str) -> Dict:
         """
         Extract JSON from text, handling cases where the model might add explanatory text
@@ -107,43 +108,20 @@ class QueryProcessor:
             # Clean input query
             processed_query = self.preprocess_query(query)
             
-            # Get structured analysis from LLM
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{
-                    "role": "user",
-                    "content": self.query_prompt.format(query=processed_query)
-                }],
+            # One call returns the analysis and the term expansions, validated against QueryAnalysis
+            analysis = structured_completion(
+                self.client,
+                self.model,
+                [{"role": "user", "content": self.query_prompt.format(query=processed_query)}],
+                QueryAnalysis,
                 temperature=0.2,
-                response_format={"type": "json_object"}  # Specify JSON response format
             )
             
-            # Get response text
-            response_text = response.choices[0].message.content
-            
-            # Parse the JSON response
-            try:
-                structured_response = json.loads(response_text)
-            except json.JSONDecodeError:
-                # Try to extract JSON from text if direct parsing fails
-                self.logger.warning("Failed to parse direct JSON response, attempting to extract JSON from text")
-                structured_response = self.extract_json_from_text(response_text)
-            
-            # Validate and normalize the response structure
-            structured_response = self.normalize_response(structured_response)
-            
-            # Create a combined list of all search terms for expansion
-            all_terms = []
-            for field in ['research_areas', 'specific_topics', 'methodologies']:
-                if field in structured_response and structured_response[field]:
-                    all_terms.extend(structured_response[field])
-            
-            # Get term expansions if we have at least one term
-            if all_terms:
-                # Select at most 5 terms to avoid overloading the prompt
-                selected_terms = all_terms[:5]
-                expanded_terms = self.expand_search_terms(selected_terms)
-                structured_response['expanded_terms'] = expanded_terms
+            structured_response = analysis.model_dump(exclude={'expanded_terms'})
+            structured_response['expanded_terms'] = {
+                expansion.term: self._dedupe(expansion.related_terms)
+                for expansion in analysis.expanded_terms
+            }
             
             # Add timestamp for tracking
             structured_response['processed_at'] = datetime.now().isoformat()
@@ -164,102 +142,11 @@ class QueryProcessor:
                 'error': str(e)
             }
     
-    def normalize_response(self, response: Dict) -> Dict:
-        """
-        Normalize and validate the structured response
-        
-        Args:
-            response: Raw response dictionary
-            
-        Returns:
-            Normalized response dictionary
-        """
-        normalized = {}
-        
-        # Define expected fields and their default values
-        expected_fields = {
-            'research_areas': [],
-            'specific_topics': [],
-            'methodologies': [],
-            'temporal_context': 'current',
-            'search_keywords': []
-        }
-        
-        # Ensure all expected fields exist with appropriate types
-        for field, default in expected_fields.items():
-            if field in response and response[field] is not None:
-                # Ensure list fields are actually lists
-                if isinstance(default, list) and not isinstance(response[field], list):
-                    if isinstance(response[field], str):
-                        normalized[field] = [response[field]]
-                    else:
-                        normalized[field] = default
-                else:
-                    normalized[field] = response[field]
-            else:
-                normalized[field] = default
-        
-        return normalized
-    
-    def expand_search_terms(self, terms: List[str]) -> Dict[str, List[str]]:
-        """
-        Expand search terms with related concepts and alternative phrasings
-        
-        Args:
-            terms: List of search terms to expand
-            
-        Returns:
-            Dictionary mapping original terms to lists of related terms
-        """
-        if not terms:
-            return {}
-            
-        try:
-            # Get expansion suggestions from LLM
-            response = self.client.chat.completions.create(
-                model="gpt-4o",
-                messages=[{
-                    "role": "user",
-                    "content": self.expansion_prompt.format(terms=", ".join(terms))
-                }],
-                temperature=0.3,
-                response_format={"type": "json_object"}  # Specify JSON response format
-            )
-            
-            # Get response text
-            expansion_text = response.choices[0].message.content
-            
-            # Parse the JSON response
-            try:
-                expansions = json.loads(expansion_text)
-            except json.JSONDecodeError:
-                # Try to extract JSON from text if direct parsing fails
-                self.logger.warning("Failed to parse direct JSON response for expansions, attempting to extract JSON")
-                expansions = self.extract_json_from_text(expansion_text)
-            
-            # Ensure we have the proper structure
-            validated_expansions = {}
-            for term in terms:
-                if term in expansions and isinstance(expansions[term], list):
-                    # Remove duplicates while preserving order
-                    unique_expansions = []
-                    seen = set()
-                    for item in expansions[term]:
-                        item_lower = item.lower()
-                        if item_lower not in seen:
-                            seen.add(item_lower)
-                            unique_expansions.append(item)
-                    
-                    validated_expansions[term] = unique_expansions
-                else:
-                    validated_expansions[term] = []
-                    
-            return validated_expansions
-            
-        except Exception as e:
-            self.logger.error(f"Error expanding search terms: {str(e)}")
-            # Return empty expansions in case of error
-            return {term: [] for term in terms}
+    @staticmethod
+    def _dedupe(terms: List[str]) -> List[str]:
+        """Remove case-insensitive duplicates while preserving order"""
+        seen = set()
+        return [t for t in terms if not (t.lower() in seen or seen.add(t.lower()))]
     
     def preprocess_query(self, query: str) -> str:
         """
@@ -341,7 +228,7 @@ class QueryProcessor:
             """
             
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.model,
                 messages=[{
                     "role": "user",
                     "content": interdisciplinary_prompt
@@ -367,6 +254,7 @@ class QueryProcessor:
             self.logger.error(f"Error analyzing interdisciplinary aspects: {str(e)}")
             return {"is_interdisciplinary": False, "connections": []}
 
-def create_query_processor(api_key: str) -> QueryProcessor:
+def create_query_processor(api_key: str, model: str = DEFAULT_LLM_MODEL,
+                           base_url: Optional[str] = None) -> QueryProcessor:
     """Factory function to create a QueryProcessor instance"""
-    return QueryProcessor(api_key)
+    return QueryProcessor(api_key, model, base_url)

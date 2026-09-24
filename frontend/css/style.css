@@ -641,3 +641,16 @@ footer {
         gap: 0.75rem;
     }
 }
+/* Agent mode toggle on the search form */
+.agent-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+}
+
+.agent-toggle small {
+    display: block;
+    margin-top: 0.25rem;
+    color: var(--text-light);
+}

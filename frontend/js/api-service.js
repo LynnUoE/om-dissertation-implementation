@@ -54,6 +54,36 @@ const ApiService = {
         }
     },
     
+    // Agentic search: the LLM decides which search tools to call
+    agentSearch: async function(query, options = {}) {
+        try {
+            console.log("Sending agent search request:", { query, options });
+            
+            const response = await fetch(`${API_BASE_URL}/agent-search`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    query: query,
+                    options: options
+                })
+            });
+            
+            if (!response.ok) {
+                throw await apiError(response);
+            }
+            
+            const data = await response.json();
+            console.log("Agent search API response:", data);
+            
+            return data;
+        } catch (error) {
+            console.error('Error in agent search:', error);
+            throw error;
+        }
+    },
+    
     // Perform advanced search with specific parameters
     advancedSearch: async function(researchAreas, specificTopics, methodologies, options = {}) {
         try {

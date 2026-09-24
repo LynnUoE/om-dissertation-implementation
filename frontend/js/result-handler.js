@@ -64,6 +64,11 @@ async function initializeResultsPage() {
         // Display query information
         displayQuerySummary(searchResults);
         
+        // Agent searches carry a summary and a trace of the tools the LLM called
+        if (searchResults.agent) {
+            displayAgentPanel(searchResults);
+        }
+        
         // Display publication results
         if (searchResults.results && searchResults.results.length > 0) {
             console.log(`Displaying ${searchResults.results.length} publication results`);
@@ -250,6 +255,12 @@ function createPublicationCard(publication) {
                 </div>
             </div>
             
+            ${publication.agent_reason ? `
+            <div class="agent-reason">
+                <span class="metadata-label"><i class="fas fa-robot"></i> Why this paper:</span>
+                ${escapeHtml(publication.agent_reason)}
+            </div>` : ''}
+            
             ${keywords.length > 0 ? `
             <div class="publication-keywords">
                 <span class="keywords-label">Keywords:</span>
@@ -277,6 +288,57 @@ function createPublicationCard(publication) {
     }
     
     return card;
+}
+
+/**
+ * Escape text (e.g. LLM output) before inserting it into HTML
+ */
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+}
+
+/**
+ * Show the agent's summary, recommended researchers and tool-call trace
+ */
+function displayAgentPanel(searchResults) {
+    const panel = document.getElementById('agent-panel');
+    if (!panel) return;
+    
+    const agent = searchResults.agent;
+    const usage = agent.usage || {};
+    const authors = searchResults.authors || [];
+    
+    // Agent results have no extracted research areas / topics
+    const queryAnalysis = document.querySelector('.query-analysis');
+    if (queryAnalysis) queryAnalysis.style.display = 'none';
+    
+    const traceRows = (agent.trace || []).map(t => `
+        <li class="${t.result.startsWith('error') ? 'trace-error' : ''}">
+            <span class="trace-step">Step ${t.step}</span>
+            <code>${escapeHtml(t.tool)}(${escapeHtml(JSON.stringify(t.arguments))})</code>
+            <span class="trace-result">&rarr; ${escapeHtml(t.result)} &middot; ${t.duration_ms} ms</span>
+        </li>`).join('');
+    
+    const authorItems = authors.map(a => `
+        <li><strong>${escapeHtml(a.name)}</strong>${a.institution ? ` (${escapeHtml(a.institution)})` : ''}
+            &middot; h-index ${a.h_index ?? 'n/a'} &middot; ${escapeHtml(a.reason)}</li>`).join('');
+    
+    panel.innerHTML = `
+        <h3><i class="fas fa-robot"></i> Agent Summary</h3>
+        <p class="agent-summary">${escapeHtml(searchResults.summary)}</p>
+        ${authors.length ? `<h4>Researchers</h4><ul class="agent-authors">${authorItems}</ul>` : ''}
+        <details class="agent-trace">
+            <summary>
+                How the agent searched: ${(agent.trace || []).length} tool calls,
+                ${usage.llm_calls || 0} LLM calls, ${(usage.prompt_tokens || 0) + (usage.completion_tokens || 0)} tokens
+                (${escapeHtml(agent.model)})
+            </summary>
+            <ol>${traceRows}</ol>
+        </details>
+    `;
+    panel.hidden = false;
 }
 
 /**

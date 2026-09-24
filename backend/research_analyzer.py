@@ -1,9 +1,10 @@
-from openai import OpenAI
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Any, Union
 import json
 import logging
 from datetime import datetime
+
+from llm import DEFAULT_LLM_MODEL, create_llm_client
 
 @dataclass
 class AnalysisResult:
@@ -22,9 +23,10 @@ class AnalysisResult:
 class ResearchAnalyzer:
     """Analyzes academic literature using LLM capabilities."""
     
-    def __init__(self, api_key: str):
-        """Initialize the analyzer with OpenAI API key."""
-        self.client = OpenAI(api_key=api_key)
+    def __init__(self, api_key: str, model: str = DEFAULT_LLM_MODEL, base_url: Optional[str] = None):
+        """Initialize the analyzer with an LLM API key, model and optional OpenAI-compatible base URL."""
+        self.client = create_llm_client(api_key, base_url)
+        self.model = model
         
         # Configure logging
         self.logger = logging.getLogger('ResearchAnalyzer')
@@ -201,7 +203,7 @@ class ResearchAnalyzer:
             
             # Get analysis from LLM
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.model,
                 messages=[{
                     "role": "user",
                     "content": self.publication_analysis_prompt.format(**prompt_data)
@@ -333,7 +335,7 @@ class ResearchAnalyzer:
             
             # Get synthesis from LLM
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.model,
                 messages=[{
                     "role": "user",
                     "content": self.synthesis_prompt.format(
@@ -422,7 +424,7 @@ class ResearchAnalyzer:
             
             # Get methodology analysis from LLM
             response = self.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.model,
                 messages=[{
                     "role": "user",
                     "content": self.methodology_analysis_prompt.format(
@@ -574,6 +576,7 @@ class ResearchAnalyzer:
         
         return top_publications
 
-def create_analyzer(api_key: str) -> ResearchAnalyzer:
+def create_analyzer(api_key: str, model: str = DEFAULT_LLM_MODEL,
+                    base_url: Optional[str] = None) -> ResearchAnalyzer:
     """Factory function to create a ResearchAnalyzer instance."""
-    return ResearchAnalyzer(api_key)
+    return ResearchAnalyzer(api_key, model, base_url)

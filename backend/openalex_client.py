@@ -160,8 +160,13 @@ class OpenAlexClient:
                 response = self.session.request(method, url, params=request_params)
                 
                 if response.status_code != 200:
-                    error_data = response.json() if response.content else {}
-                    error_message = error_data.get('message', str(response.content))
+                    # Error bodies are not always JSON (e.g. 404 pages); don't let parsing
+                    # them look like a network failure and trigger retries
+                    try:
+                        error_data = response.json() if response.content else {}
+                    except ValueError:
+                        error_data = {}
+                    error_message = error_data.get('message') or f"HTTP {response.status_code}: {response.text[:200]}"
                     self.logger.error(f"API Error: {error_message}")
                     
                     if response.status_code == 429:
@@ -251,7 +256,8 @@ class OpenAlexClient:
             filter_parts.append(f"publication_year:{year_range}")
         
         if min_citations is not None:
-            filter_parts.append(f"cited_by_count:{min_citations}")
+            # OpenAlex reads cited_by_count:N as "exactly N"; we want "at least N"
+            filter_parts.append(f"cited_by_count:>{min_citations - 1}")
         
         if filter_parts:
             params['filter'] = ','.join(filter_parts)
@@ -290,14 +296,21 @@ class OpenAlexClient:
         Returns:
             OpenAlex API response
         """
-        # Make sure the work_id is properly formatted
-        if not work_id.startswith('W') and not work_id.startswith('https://openalex.org/W'):
-            if work_id.startswith('https://openalex.org/'):
-                work_id = work_id.replace('https://openalex.org/', '')
-            else:
-                work_id = f"W{work_id}"
+        # Accept OpenAlex IDs (W123, https://openalex.org/W123) and DOIs (https://doi.org/10.x, 10.x)
+        if work_id.startswith('https://doi.org/'):
+            work_id = f"doi:{work_id[len('https://doi.org/'):]}"
+        elif work_id.startswith('10.'):
+            work_id = f"doi:{work_id}"
+        elif work_id.startswith('https://openalex.org/'):
+            work_id = work_id.replace('https://openalex.org/', '')
+        elif not work_id.startswith('W'):
+            work_id = f"W{work_id}"
         
         return self._make_request(f'works/{work_id}')
+    
+    def search_authors(self, query: str, per_page: int = 10) -> OpenAlexResponse:
+        """Search for authors by name."""
+        return self._make_request('authors', {'search': query, 'per-page': min(per_page, 200)})
 
 def create_client(email: str, api_key: Optional[str] = None) -> OpenAlexClient:
     """Factory function to create an OpenAlexClient instance."""
