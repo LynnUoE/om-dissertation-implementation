@@ -7,15 +7,28 @@ import logging
 from urllib.parse import quote
 import html
 
+
+def reconstruct_abstract(inverted_index: Optional[Dict[str, List[int]]]) -> Optional[str]:
+    """Rebuild abstract text from OpenAlex's abstract_inverted_index ({word: [positions]})."""
+    if not inverted_index:
+        return None
+    positions = [(pos, word) for word, pos_list in inverted_index.items() for pos in pos_list]
+    return " ".join(word for _, word in sorted(positions))
+
+
 @dataclass
 class WorkResult:
     """Structured container for work data"""
     title: str
     publication_date: str
     citations: int
-    doi: Optional[str]
+    doi: Optional[str]  # Full DOI URL as returned by OpenAlex, e.g. https://doi.org/10.1234/abc
     authors: List[str]
     abstract: Optional[str]
+    journal: Optional[str] = None
+    source_type: Optional[str] = None  # OpenAlex source type: journal, conference, repository...
+    work_type: Optional[str] = None  # OpenAlex work type: article, preprint, review...
+    is_open_access: bool = False
     
     @classmethod
     def from_api_response(cls, data: Dict) -> 'WorkResult':
@@ -39,6 +52,8 @@ class WorkResult:
                     if display_name:
                         authors.append(display_name)
         
+        source = (data.get('primary_location') or {}).get('source') or {}
+        
         # Get other fields with safe defaults
         return cls(
             title=title,
@@ -46,7 +61,11 @@ class WorkResult:
             citations=data.get('cited_by_count', 0),
             doi=data.get('doi'),
             authors=authors,
-            abstract=data.get('abstract')
+            abstract=reconstruct_abstract(data.get('abstract_inverted_index')),
+            journal=source.get('display_name'),
+            source_type=source.get('type'),
+            work_type=data.get('type'),
+            is_open_access=bool((data.get('open_access') or {}).get('is_oa'))
         )
 
 @dataclass
@@ -109,6 +128,8 @@ class OpenAlexClient:
             )
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
+            # Own handler already prints; don't also bubble up to the root logger (duplicate lines)
+            self.logger.propagate = False
 
     def _make_request(
         self,
