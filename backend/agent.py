@@ -168,10 +168,12 @@ class ResearchAgent:
             summary = f"error: {result['error']}"
         elif "papers" in result:
             summary = f"{len(result['papers'])} papers"
+        elif "paper_id" in result:  # get_paper (its details also carry an 'authors' list)
+            summary = result.get("title") or result["paper_id"]
         elif "authors" in result:
             summary = f"{len(result['authors'])} authors"
         else:
-            summary = result.get("title") or "ok"
+            summary = "ok"
         return {"step": step, "tool": call.function.name, "arguments": arguments,
                 "result": summary, "duration_ms": duration_ms}
 

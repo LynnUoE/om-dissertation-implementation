@@ -75,6 +75,7 @@ def test_parallel_tool_calls_all_get_results_in_order(fake_openalex):
     assert [m["tool_call_id"] for m in tool_messages] == ["call_a", "call_b", "call_c"]
     assert result["authors"][0]["name"] == "Ada" and result["authors"][0]["reason"] == "expert"
     assert {t["step"] for t in result["agent"]["trace"]} == {1}
+    assert [t["result"] for t in result["agent"]["trace"]] == ["3 papers", "1 authors", "Paper 3"]
 
 
 def test_last_step_forces_an_answer(fake_openalex):
