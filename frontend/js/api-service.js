@@ -3,7 +3,8 @@
  * Handles all API communication with the backend
  */
 
-const API_BASE_URL = 'http://localhost:5000/api';
+// Same-origin: Flask serves the frontend, nginx proxies /api in deployment
+const API_BASE_URL = '/api';
 
 const ApiService = {
     // Search for literature based on natural language query

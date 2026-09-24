@@ -22,11 +22,13 @@ class Config:
     """Application configuration"""
     OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
     RESEARCHER_EMAIL = os.getenv("RESEARCHER_EMAIL", "research@example.com")
-    STATIC_FOLDER = os.getenv("STATIC_FOLDER", "../frontend")
+    # Relative paths resolve against this file, so the server can start from any cwd
+    STATIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 os.getenv("STATIC_FOLDER", "../frontend"))
     CACHE_DURATION = int(os.getenv("CACHE_DURATION", "24"))  # Hours
     DEBUG = os.getenv("DEBUG", "False").lower() == "true"
     HOST = os.getenv("HOST", "0.0.0.0")
-    PORT = int(os.getenv("PORT", "5000"))
+    PORT = int(os.getenv("PORT", "5001"))
     REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "120"))  # Seconds
     MAX_RESULTS = int(os.getenv("MAX_RESULTS", "20"))
     

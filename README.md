@@ -21,46 +21,43 @@ The system follows a service-oriented architecture with:
 ### Prerequisites
 
 - Python 3.12+
-- Nginx
 - OpenAI API key
+- Nginx (only for production deployment)
 
-### Backend Setup
+### Quick Start (local)
+
+Flask serves the frontend as well as the API, so no Nginx is needed for local development.
 
 1. Clone the repository
    ```
    git clone https://github.com/LynnUoE/om-dissertation-implementation.git
+   cd om-dissertation-implementation
    ```
 
-2. Create a virtual environment
+2. Create a virtual environment and install dependencies
    ```
-   python -m venv venv
-   source venv/bin/activate  # On Windows, use: venv\Scripts\activate
-   ```
-
-3. Install dependencies
-   ```
+   python3 -m venv .venv
+   source .venv/bin/activate  # On Windows, use: .venv\Scripts\activate
    pip install -r requirements.txt
    ```
 
-4. Edit the  `.env` file in the backend directory with the following variables:
+3. Create `backend/.env` from the template and fill in your OpenAI API key
    ```
-   OPENAI_API_KEY=your_openai_api_key
-   RESEARCHER_EMAIL=your_email@example.com 
-   STATIC_FOLDER=../frontend
-   DEBUG=True  # Set to False in production
-   # Flask Configuration
-   FLASK_ENV=development
-   FLASK_DEBUG=1
+   cp backend/.env.example backend/.env
    ```
 
-5. Run the backend server
+4. Run the server
    ```
-   python api_server.py
+   python backend/api_server.py
    ```
 
-### Frontend Setup
+5. Open http://localhost:5001
 
-The frontend is static HTML, CSS, and JavaScript that can be served directly by Nginx.
+> The default port is 5001 because macOS AirPlay Receiver occupies port 5000. Override it with `PORT` in `backend/.env`.
+
+### Production Deployment (Nginx)
+
+In production, Nginx can serve the static frontend and proxy `/api/` to Flask. A full config is in `config/nginx.conf`.
 
 1. Configure Nginx to serve the frontend and proxy API requests:
 
@@ -100,7 +97,7 @@ http {
         
         # Handle API requests and proxy to Flask backend
         location /api/ {
-            proxy_pass http://localhost:5000/api/;
+            proxy_pass http://localhost:5001/api/;
             proxy_http_version 1.1;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
@@ -189,8 +186,9 @@ backend/
 ├── literature_searcher.py      # Publication search functionality
 ├── openalex_client.py          # Interface to OpenAlex API
 ├── research_analyzer.py        # Publication analysis functionality
-├── requirements.txt            # Python dependencies
-└── .env                        # Environment variables (not in repo)
+├── .env.example                # Environment variable template
+└── .env                        # Your local environment variables (git-ignored)
+requirements.txt            # Python dependencies
 frontend/                   # Static frontend files
 ├── index.html              # Home page with search form
 ├── result.html             # Search results page
@@ -225,26 +223,19 @@ The backend provides the following API endpoints:
 
 1. Activate the virtual environment
    ```
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   source .venv/bin/activate  # On Windows: .venv\Scripts\activate
    ```
 
-2. Run the server in debug mode
+2. Run the server (set `DEBUG=True` in `backend/.env` for debug mode)
    ```
-   python api_server.py
+   python backend/api_server.py
    ```
 
 3. Test API endpoints using tools like Postman or curl
 
 ### Frontend Development
 
-The frontend can be developed independently from the backend by ensuring the API service URLs point to your development backend.
-
-1. Edit `js/api-service.js` to set the correct API base URL for development:
-   ```javascript
-   const API_BASE_URL = 'http://localhost:5000/api';
-   ```
-
-2. Access the frontend at http://localhost
+`js/api-service.js` calls the API at the same-origin path `/api`, so the frontend works unchanged whether it is served by Flask (http://localhost:5001) or by Nginx.
 
 ## Integration Testing
 
@@ -255,11 +246,9 @@ To test the full frontend-backend integration:
    python api_server.py
    ```
 
-2. Ensure Nginx is configured and running to serve the frontend and proxy API requests
+2. Access the application at http://localhost:5001 (or via Nginx in production)
 
-3. Access the application via Nginx URL (e.g., http://localhost or your domain)
-
-4. Test the following workflows:
+3. Test the following workflows:
    - Simple search from the home page
    - Advanced search with research areas and topics
    - Viewing publication details
