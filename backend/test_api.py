@@ -4,7 +4,7 @@ import time
 import sys
 
 # Configuration
-API_BASE_URL = "http://localhost:5000/api"
+API_BASE_URL = "http://localhost:5001/api"
 TIMEOUT = 120  # seconds
 
 def print_header(message):

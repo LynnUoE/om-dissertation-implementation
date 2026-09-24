@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Secrets
+.env
+
+# Runtime output
+*.log
+publication_results.json
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
