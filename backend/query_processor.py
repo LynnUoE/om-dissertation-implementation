@@ -20,6 +20,8 @@ class QueryProcessor:
             )
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
+            # Own handler already prints; don't also bubble up to the root logger (duplicate lines)
+            self.logger.propagate = False
         
         # Prompt optimized for literature search queries
         self.query_prompt = """

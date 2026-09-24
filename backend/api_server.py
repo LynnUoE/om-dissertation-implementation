@@ -67,6 +67,13 @@ def get_literature_searcher() -> LiteratureSearcher:
         )
     return literature_searcher
 
+def result_response(result: Dict):
+    """Return a searcher result as JSON, with an HTTP status code that reflects failures"""
+    status_code = result.pop('http_status', 500)
+    if result.get('status') == 'success':
+        return jsonify(result)
+    return jsonify(result), status_code
+
 # Request tracking for analytics and debugging
 request_stats = {
     'total_requests': 0,
@@ -176,7 +183,7 @@ def search_literature():
         # Add response time to result
         result['response_time'] = elapsed_time
         
-        return jsonify(result)
+        return result_response(result)
         
     except Exception as e:
         logger.exception(f"Error processing search request: {str(e)}")
@@ -254,7 +261,7 @@ def advanced_search():
         # Add response time to result
         result['response_time'] = elapsed_time
         
-        return jsonify(result)
+        return result_response(result)
         
     except Exception as e:
         logger.exception(f"Error processing advanced search request: {str(e)}")
@@ -329,7 +336,7 @@ def interdisciplinary_search():
         # Add response time to result
         result['response_time'] = elapsed_time
         
-        return jsonify(result)
+        return result_response(result)
         
     except Exception as e:
         logger.exception(f"Error processing interdisciplinary search request: {str(e)}")
@@ -383,7 +390,7 @@ def get_publication_details(publication_id):
         # Add response time to result
         result['response_time'] = elapsed_time
         
-        return jsonify(result)
+        return result_response(result)
         
     except Exception as e:
         logger.exception(f"Error getting publication details: {str(e)}")
@@ -444,7 +451,7 @@ def analyze_publication(publication_id):
         # Add response time to result
         result['response_time'] = elapsed_time
         
-        return jsonify(result)
+        return result_response(result)
         
     except Exception as e:
         logger.exception(f"Error analyzing publication: {str(e)}")
@@ -481,6 +488,15 @@ def process_query():
         # Process query
         searcher = get_literature_searcher()
         structured_query = searcher.query_processor.process_query(query)
+        
+        if structured_query.get('error'):
+            logger.error(f"Query processing failed: '{query[:50]}...' - {structured_query['error']}")
+            request_stats['failed_requests'] += 1
+            return jsonify({
+                'status': 'error',
+                'message': f"Query processing failed: {structured_query['error']}",
+                'original_query': query
+            }), 502
         
         # Log results
         logger.info(f"Query processing successful: '{query[:50]}...'")

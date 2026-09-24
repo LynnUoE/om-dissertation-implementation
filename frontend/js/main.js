@@ -71,7 +71,27 @@ window.hideLoading = function() {
     }
 };
 
+/**
+ * Cap year inputs at the current year instead of a hardcoded one
+ */
+function initializeYearInputs() {
+    const currentYear = new Date().getFullYear();
+    
+    ['year-from', 'year-to', 'year-filter'].forEach(id => {
+        const input = document.getElementById(id);
+        if (input) input.max = currentYear;
+    });
+    
+    const yearTo = document.getElementById('year-to');
+    if (yearTo) yearTo.value = currentYear;
+    
+    const maxYearLabel = document.getElementById('max-year-value');
+    if (maxYearLabel) maxYearLabel.textContent = currentYear;
+}
+
 document.addEventListener('DOMContentLoaded', function() {
+    initializeYearInputs();
+    
     // Check if elements exist before initializing
     const tagsInputContainers = document.querySelectorAll('.tags-input');
     if (tagsInputContainers && tagsInputContainers.length > 0) {

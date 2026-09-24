@@ -37,6 +37,8 @@ class ResearchAnalyzer:
             )
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
+            # Own handler already prints; don't also bubble up to the root logger (duplicate lines)
+            self.logger.propagate = False
         
         # Comprehensive analysis prompt for individual publications
         self.publication_analysis_prompt = """

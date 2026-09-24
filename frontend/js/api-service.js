@@ -6,6 +6,18 @@
 // Same-origin: Flask serves the frontend, nginx proxies /api in deployment
 const API_BASE_URL = '/api';
 
+// Build an Error that carries the backend's error message, not just the status code
+async function apiError(response) {
+    let message = '';
+    try {
+        const body = await response.json();
+        message = body.message || '';
+    } catch (e) {
+        // Non-JSON error body (e.g. proxy error page)
+    }
+    return new Error(`API error: ${response.status}${message ? ` - ${message}` : ''}`);
+}
+
 const ApiService = {
     // Search for literature based on natural language query
     searchLiterature: async function(query, options = {}) {
@@ -29,7 +41,7 @@ const ApiService = {
             });
             
             if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
+                throw await apiError(response);
             }
             
             const data = await response.json();
@@ -68,7 +80,7 @@ const ApiService = {
             });
             
             if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
+                throw await apiError(response);
             }
             
             const data = await response.json();
@@ -106,7 +118,7 @@ const ApiService = {
             });
             
             if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
+                throw await apiError(response);
             }
             
             const data = await response.json();
@@ -136,9 +148,7 @@ const ApiService = {
             });
             
             if (!response.ok) {
-                const errorText = await response.text();
-                console.error("Error response:", errorText);
-                throw new Error(`API error: ${response.status}`);
+                throw await apiError(response);
             }
             
             const data = await response.json();
@@ -174,7 +184,7 @@ const ApiService = {
             });
             
             if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
+                throw await apiError(response);
             }
             
             const data = await response.json();
@@ -203,7 +213,7 @@ const ApiService = {
             });
             
             if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
+                throw await apiError(response);
             }
             
             const data = await response.json();
@@ -229,7 +239,7 @@ const ApiService = {
             });
             
             if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
+                throw await apiError(response);
             }
             
             const data = await response.json();

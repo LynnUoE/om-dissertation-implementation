@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass, field, asdict
 
 # Import from project components
-from openalex_client import create_client, OpenAlexClient
+from openalex_client import create_client, OpenAlexClient, reconstruct_abstract
 from query_processor import create_query_processor, QueryProcessor
 from research_analyzer import create_analyzer, ResearchAnalyzer
 
@@ -73,6 +73,8 @@ class LiteratureSearcher:
             )
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
+            # Own handler already prints; don't also bubble up to the root logger (duplicate lines)
+            self.logger.propagate = False
     
     def search(
         self, 
@@ -123,6 +125,21 @@ class LiteratureSearcher:
             self.logger.info(f"Extracted {len(structured_query.get('research_areas', []))} research areas " +
                         f"and {len(structured_query.get('expertise', []))} expertise areas")
             
+            # The LLM call itself failed (bad key, no credits, network...): surface the real cause
+            if structured_query.get('error'):
+                return {
+                    'status': 'error',
+                    'message': f"Query processing failed: {structured_query['error']}",
+                    'http_status': 502,
+                    'original_query': query,
+                    'structured_query': structured_query,
+                    'results': [],
+                    'metadata': {
+                        'total_results': 0,
+                        'processing_time': query_processing_time
+                    }
+                }
+            
             # If we have no search terms, return empty results
             if (not structured_query.get('research_areas') and 
                 not structured_query.get('expertise') and 
@@ -132,6 +149,7 @@ class LiteratureSearcher:
                 return {
                     'status': 'error',
                     'message': 'Could not extract search terms from query',
+                    'http_status': 422,
                     'original_query': query,
                     'structured_query': structured_query,
                     'results': [],
@@ -173,6 +191,7 @@ class LiteratureSearcher:
                 return {
                     'status': 'error',
                     'message': f'Error from OpenAlex API: {response.error}',
+                    'http_status': 502,
                     'original_query': query,
                     'structured_query': structured_query,
                     'results': [],
@@ -386,6 +405,7 @@ class LiteratureSearcher:
                     return {
                         'status': 'error',
                         'message': f'Error retrieving publication by DOI: {response.error}',
+                        'http_status': 502,
                         'publication_id': publication_id
                     }
                 
@@ -394,6 +414,7 @@ class LiteratureSearcher:
                     return {
                         'status': 'error',
                         'message': f'No publication found with DOI: {doi}',
+                        'http_status': 404,
                         'publication_id': publication_id
                     }
                 
@@ -417,6 +438,7 @@ class LiteratureSearcher:
                     return {
                         'status': 'error',
                         'message': f'Error retrieving publication details by DOI: {response.error}',
+                        'http_status': 502,
                         'publication_id': publication_id
                     }
                 
@@ -425,6 +447,7 @@ class LiteratureSearcher:
                     return {
                         'status': 'error',
                         'message': f'No publication found with DOI: {doi}',
+                        'http_status': 404,
                         'publication_id': publication_id
                     }
                 
@@ -443,6 +466,7 @@ class LiteratureSearcher:
                     return {
                         'status': 'error',
                         'message': f'Error retrieving publication details: {response.error}',
+                        'http_status': 502,
                         'publication_id': publication_id
                     }
                 
@@ -488,15 +512,15 @@ class LiteratureSearcher:
             title=work.title,
             authors=work.authors,
             publication_date=work.publication_date,
-            journal=None,  # This would come from work metadata in a real implementation
+            journal=work.journal,
             abstract=work.abstract,
             doi=work.doi,
             citations=work.citations,
-            open_access=bool(work.doi),  # Simplified check
+            open_access=work.is_open_access,
             type=self._determine_publication_type(work),
             topic_matches=topic_matches,
             relevance_score=1.0,  # Default for direct lookups
-            url=f"https://doi.org/{work.doi}" if work.doi else None
+            url=work.doi  # OpenAlex DOIs are already full https://doi.org/ URLs
         )
         
         return result
@@ -616,6 +640,7 @@ class LiteratureSearcher:
                 return {
                     'status': 'error',
                     'message': f'Error from OpenAlex API: {response.error}',
+                    'http_status': 502,
                     'query': combined_query,
                     'results': []
                 }
@@ -747,15 +772,12 @@ class LiteratureSearcher:
                 continue
                 
             # Skip if not open access and open access filter is active
-            is_open_access = work.doi is not None  # Simplified check - can be enhanced
+            is_open_access = work.is_open_access
             if open_access_only and not is_open_access:
                 continue
             
             # Generate topic matches and relevance score
             topic_matches, relevance_score = self._calculate_relevance(work, query_terms)
-            
-            # Extract journal name
-            journal = None  # This would come from work metadata in a real implementation
             
             # Create result
             result = LiteratureSearchResult(
@@ -763,7 +785,7 @@ class LiteratureSearcher:
                 title=work.title,
                 authors=work.authors,
                 publication_date=work.publication_date,
-                journal=journal,
+                journal=work.journal,
                 abstract=work.abstract,
                 doi=work.doi,
                 citations=work.citations,
@@ -771,7 +793,7 @@ class LiteratureSearcher:
                 type=work_type,
                 topic_matches=topic_matches,
                 relevance_score=relevance_score,
-                url=f"https://doi.org/{work.doi}" if work.doi else None
+                url=work.doi  # OpenAlex DOIs are already full https://doi.org/ URLs
             )
             
             literature_results.append(result)
@@ -794,11 +816,9 @@ class LiteratureSearcher:
             if 'author' in authorship and 'display_name' in authorship['author']:
                 authors.append(authorship['author']['display_name'])
         
-        # Extract journal name
-        journal = None
-        if 'primary_location' in publication_data and publication_data['primary_location']:
-            if 'source' in publication_data['primary_location']:
-                journal = publication_data['primary_location']['source'].get('display_name')
+        # Extract journal name (primary_location and source can both be null)
+        source = (publication_data.get('primary_location') or {}).get('source') or {}
+        journal = source.get('display_name')
         
         # Extract concepts for topic matches
         topic_matches = {}
@@ -810,16 +830,16 @@ class LiteratureSearcher:
         pub_type = self._determine_publication_type_from_data(publication_data)
         
         # Check if open access
-        is_open_access = publication_data.get('open_access', {}).get('is_oa', False)
+        is_open_access = bool((publication_data.get('open_access') or {}).get('is_oa'))
         
-        # Get DOI and URL
+        # Get DOI and URL (OpenAlex DOIs are already full https://doi.org/ URLs)
         doi = publication_data.get('doi')
-        url = f"https://doi.org/{doi}" if doi else None
+        url = doi
         
         return LiteratureSearchResult(
             id=publication_data.get('id', ''),
             title=publication_data.get('title', 'Untitled Publication'),
-            abstract=publication_data.get('abstract', None),
+            abstract=reconstruct_abstract(publication_data.get('abstract_inverted_index')),
             authors=authors,
             publication_date=publication_data.get('publication_date', None),
             journal=journal,
@@ -1118,49 +1138,23 @@ class LiteratureSearcher:
         
         return filtered_terms
     
+    @staticmethod
+    def _map_publication_type(work_type: Optional[str], source_type: Optional[str]) -> str:
+        """Map OpenAlex work/source types onto the frontend's publication type labels"""
+        if work_type in ('preprint', 'review', 'book-chapter'):
+            return work_type
+        if work_type == 'proceedings-article' or source_type == 'conference':
+            return 'conference-paper'
+        return 'journal-article'  # Default, also covers OpenAlex's generic 'article'
+    
     def _determine_publication_type(self, work: Any) -> str:
-        """
-        Determine publication type from work metadata
-        
-        Args:
-            work: Work result from OpenAlex API
-            
-        Returns:
-            Publication type string
-        """
-        # Simplified implementation - in a real system, would use API metadata
-        if not work.doi:
-            return "preprint"
-        
-        # Additional logic would go here based on available metadata
-        return "journal-article"
+        """Determine publication type from a WorkResult"""
+        return self._map_publication_type(work.work_type, work.source_type)
     
     def _determine_publication_type_from_data(self, publication_data: Dict) -> str:
-        """
-        Determine publication type from detailed publication data
-        
-        Args:
-            publication_data: Publication data from OpenAlex
-            
-        Returns:
-            Publication type string
-        """
-        # Check type field if available
-        if 'type' in publication_data:
-            type_value = publication_data.get('type')
-            if type_value == 'journal-article':
-                return 'journal-article'
-            elif type_value == 'proceedings-article':
-                return 'conference-paper'
-            elif type_value == 'book-chapter':
-                return 'book-chapter'
-            elif type_value == 'review':
-                return 'review'
-            elif type_value == 'preprint':
-                return 'preprint'
-        
-        # If no type or unknown type, make a best guess
-        return "journal-article"  # Default
+        """Determine publication type from raw OpenAlex publication data"""
+        source = (publication_data.get('primary_location') or {}).get('source') or {}
+        return self._map_publication_type(publication_data.get('type'), source.get('type'))
     
     def _extract_year_from_temporal_context(self, temporal_context: str) -> Optional[int]:
         """
