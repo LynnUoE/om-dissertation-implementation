@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "litfinder": {
+      "type": "stdio",
+      "command": ".venv/bin/python",
+      "args": ["backend/mcp_server.py"]
+    }
+  }
+}

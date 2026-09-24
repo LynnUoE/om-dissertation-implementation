@@ -93,3 +93,9 @@ def test_min_citations_filter_means_at_least():
     client._make_request = lambda endpoint, params=None, method="GET": captured.update(params) or None
     client.search_works("x", min_citations=100)
     assert captured["filter"] == "cited_by_count:>99"
+
+
+def test_duplicate_titles_are_collapsed():
+    works = [make_work(1, title="SignalP 6.0"), make_work(2, title="signalp 6.0 "), make_work(3)]
+    papers = ToolExecutor(FakeOpenAlex(works)).execute("search_papers", search_args())["papers"]
+    assert [p["paper_id"] for p in papers] == ["W1", "W3"]
