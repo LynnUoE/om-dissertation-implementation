@@ -89,6 +89,7 @@ class OpenAlexClient:
                  max_retries: int = 3, rate_limit_delay: float = 1.0):
         self.base_url = "https://api.openalex.org"
         self.email = email
+        self.api_key = api_key  # Optional; avoids the anonymous search rate limit
         self.max_retries = max_retries
         self.rate_limit_delay = rate_limit_delay
         
@@ -108,7 +109,6 @@ class OpenAlexClient:
             )
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
-        self.api_key = api_key  # Optional; avoids the anonymous search rate limit
 
     def _make_request(
         self,
@@ -189,6 +189,13 @@ class OpenAlexClient:
                 )
             
             time.sleep(self.rate_limit_delay)
+        
+        # Every attempt was rate limited
+        return OpenAlexResponse(
+            status_code=429,
+            data={},
+            error=f"Rate limit exceeded after {self.max_retries} attempts"
+        )
     
     def search_works(
         self,
@@ -210,13 +217,6 @@ class OpenAlexClient:
         # Add search query if provided
         if query:
             params['search'] = query
-        
-        # Every attempt was rate limited
-        return OpenAlexResponse(
-            status_code=429,
-            data={},
-            error=f"Rate limit exceeded after {self.max_retries} attempts"
-        )
         
         # Build filter parts
         filter_parts = []
