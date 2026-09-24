@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, asdict
 
 # Import from project components
 from openalex_client import create_client, OpenAlexClient, reconstruct_abstract
+from llm import DEFAULT_LLM_MODEL
 from query_processor import create_query_processor, QueryProcessor
 from research_analyzer import create_analyzer, ResearchAnalyzer
 
@@ -42,21 +43,25 @@ class LiteratureSearcher:
         openai_api_key: str,
         email_for_openalex: str,
         openalex_api_key: Optional[str] = None,
-        cache_duration: int = 24  # Cache duration in hours
+        cache_duration: int = 24,  # Cache duration in hours
+        llm_model: str = DEFAULT_LLM_MODEL,
+        llm_base_url: Optional[str] = None
     ):
         """
         Initialize the literature searcher
         
         Args:
-            openai_api_key: API key for OpenAI
+            openai_api_key: API key for OpenAI (or the OpenAI-compatible provider at llm_base_url)
             email_for_openalex: Email for OpenAlex API identification
             openalex_api_key: Optional OpenAlex API key (avoids anonymous rate limits)
             cache_duration: Duration in hours to cache results
+            llm_model: Chat model name (or provider endpoint ID)
+            llm_base_url: Optional OpenAI-compatible API base URL
         """
         # Initialize components
-        self.query_processor = create_query_processor(openai_api_key)
+        self.query_processor = create_query_processor(openai_api_key, llm_model, llm_base_url)
         self.openalex_client = create_client(email_for_openalex, openalex_api_key)
-        self.research_analyzer = create_analyzer(openai_api_key)
+        self.research_analyzer = create_analyzer(openai_api_key, llm_model, llm_base_url)
         self.cache_duration = cache_duration
         
         # Setup result cache
@@ -581,7 +586,7 @@ class LiteratureSearcher:
             
             # Get specialized interdisciplinary analysis
             response = self.query_processor.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.query_processor.model,
                 messages=[{
                     "role": "user",
                     "content": interdisciplinary_prompt
@@ -800,6 +805,10 @@ class LiteratureSearcher:
         
         return literature_results
     
+    def format_publication(self, publication_data: Dict) -> Dict:
+        """Convert a raw OpenAlex work into the API's publication dict"""
+        return self._process_publication_data(publication_data).to_dict()
+    
     def _process_publication_data(self, publication_data: Dict) -> LiteratureSearchResult:
         """
         Process detailed publication data from OpenAlex
@@ -963,7 +972,7 @@ class LiteratureSearcher:
             
             # Get synthesis from LLM
             response = self.query_processor.client.chat.completions.create(
-                model="gpt-4o",
+                model=self.query_processor.model,
                 messages=[{
                     "role": "user",
                     "content": synthesis_prompt
@@ -1244,7 +1253,10 @@ class LiteratureSearcher:
 def create_literature_searcher(
     openai_api_key: str,
     email_for_openalex: str,
-    openalex_api_key: Optional[str] = None
+    openalex_api_key: Optional[str] = None,
+    llm_model: str = DEFAULT_LLM_MODEL,
+    llm_base_url: Optional[str] = None
 ) -> LiteratureSearcher:
     """Factory function to create a LiteratureSearcher instance"""
-    return LiteratureSearcher(openai_api_key, email_for_openalex, openalex_api_key)
+    return LiteratureSearcher(openai_api_key, email_for_openalex, openalex_api_key,
+                              llm_model=llm_model, llm_base_url=llm_base_url)

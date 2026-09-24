@@ -12,6 +12,8 @@ from query_processor import create_query_processor
 from openalex_client import create_client
 from research_analyzer import create_analyzer
 from literature_searcher import create_literature_searcher, LiteratureSearcher
+from agent import ResearchAgent
+from llm import DEFAULT_LLM_MODEL
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -20,7 +22,11 @@ load_dotenv()
 # Configuration
 class Config:
     """Application configuration"""
-    OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+    # LLM provider: OpenAI by default, or any OpenAI-compatible API via LLM_BASE_URL
+    LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+    LLM_BASE_URL = os.getenv("LLM_BASE_URL") or None
+    LLM_MODEL = os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
+    AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))  # Max LLM calls per agent search
     RESEARCHER_EMAIL = os.getenv("RESEARCHER_EMAIL", "research@example.com")
     OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")  # Optional
     # Relative paths resolve against this file, so the server can start from any cwd
@@ -36,8 +42,8 @@ class Config:
     @classmethod
     def validate(cls):
         """Validate required configuration"""
-        if not cls.OPENAI_API_KEY:
-            raise ValueError("OPENAI_API_KEY is required")
+        if not cls.LLM_API_KEY:
+            raise ValueError("OPENAI_API_KEY (or LLM_API_KEY) is required")
         
         if not os.path.isdir(cls.STATIC_FOLDER):
             raise ValueError(f"Static folder does not exist: {cls.STATIC_FOLDER}")
@@ -61,11 +67,29 @@ def get_literature_searcher() -> LiteratureSearcher:
     global literature_searcher
     if literature_searcher is None:
         literature_searcher = create_literature_searcher(
-            Config.OPENAI_API_KEY,
+            Config.LLM_API_KEY,
             Config.RESEARCHER_EMAIL,
-            Config.OPENALEX_API_KEY
+            Config.OPENALEX_API_KEY,
+            llm_model=Config.LLM_MODEL,
+            llm_base_url=Config.LLM_BASE_URL
         )
     return literature_searcher
+
+research_agent: Optional[ResearchAgent] = None
+
+def get_research_agent() -> ResearchAgent:
+    """Get or initialize the research agent singleton (shares the searcher's clients)"""
+    global research_agent
+    if research_agent is None:
+        searcher = get_literature_searcher()
+        research_agent = ResearchAgent(
+            llm_client=searcher.query_processor.client,
+            model=Config.LLM_MODEL,
+            openalex_client=searcher.openalex_client,
+            format_paper=searcher.format_publication,
+            max_steps=Config.AGENT_MAX_STEPS
+        )
+    return research_agent
 
 def result_response(result: Dict):
     """Return a searcher result as JSON, with an HTTP status code that reflects failures"""
@@ -460,6 +484,67 @@ def analyze_publication(publication_id):
             'status': 'error',
             'message': f'An error occurred while analyzing the publication: {str(e)}',
             'publication_id': publication_id
+        }), 500
+
+@app.route('/api/agent-search', methods=['POST'])
+def agent_search():
+    """
+    Agentic literature search: the LLM chooses which search tools to call
+    
+    Expects JSON with:
+    - query: Natural language query describing research interests
+    - options.max_steps: Optional cap on LLM calls (2-10)
+    """
+    start_time = time.time()
+    request_stats['total_requests'] += 1
+    
+    try:
+        data = request.json
+        if not data or not str(data.get('query', '')).strip():
+            request_stats['failed_requests'] += 1
+            return jsonify({
+                'status': 'error',
+                'message': 'Missing query parameter'
+            }), 400
+        
+        query = data['query']
+        options = data.get('options') or {}
+        max_steps = options.get('max_steps')
+        if max_steps is not None and (not isinstance(max_steps, int) or isinstance(max_steps, bool)):
+            request_stats['failed_requests'] += 1
+            return jsonify({
+                'status': 'error',
+                'message': 'options.max_steps must be an integer'
+            }), 400
+        
+        result = get_research_agent().run(query, max_steps=max_steps)
+        
+        if result['status'] == 'success':
+            agent = result['agent']
+            logger.info(
+                f"Agent search successful: '{query[:50]}...' - {len(result['results'])} results, "
+                f"{agent['usage']['llm_calls']} LLM calls, {len(agent['trace'])} tool calls"
+            )
+            request_stats['successful_requests'] += 1
+        else:
+            logger.error(f"Agent search failed: '{query[:50]}...' - {result.get('message')}")
+            request_stats['failed_requests'] += 1
+        
+        elapsed_time = time.time() - start_time
+        request_stats['average_response_time'] = (
+            (request_stats['average_response_time'] * (request_stats['total_requests'] - 1) + elapsed_time) / 
+            request_stats['total_requests']
+        )
+        result['response_time'] = elapsed_time
+        
+        return result_response(result)
+        
+    except Exception as e:
+        logger.exception(f"Error processing agent search request: {str(e)}")
+        request_stats['failed_requests'] += 1
+        return jsonify({
+            'status': 'error',
+            'message': f'An error occurred while processing your request: {str(e)}'
         }), 500
 
 @app.route('/api/process-query', methods=['POST'])

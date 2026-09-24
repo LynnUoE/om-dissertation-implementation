@@ -12,9 +12,27 @@ The system follows a service-oriented architecture with:
 
 ### Core Components
 
-1. **Query Processor**: Transforms natural language queries into structured search parameters using GPT-4o
+1. **Query Processor**: Transforms natural language queries into structured search parameters with one LLM call, validated by a Pydantic schema (Structured Outputs)
 2. **Literature Searcher**: Interfaces with the OpenAlex API to find relevant academic publications
 3. **Research Analyzer**: Evaluates and contextualizes search results to provide meaningful insights
+4. **Research Agent**: Lets the LLM plan the search itself via function calling (see below)
+
+### Agent Search (function calling)
+
+`POST /api/agent-search` runs a tool-calling loop instead of the fixed pipeline:
+
+1. The model receives the query plus four tools, defined as Pydantic models that generate strict JSON Schemas (`backend/tools.py`):
+   `search_papers`, `get_paper`, `search_authors`, `get_author_papers`.
+2. When the model returns tool calls, the server runs them (in parallel), and appends each result as a `role="tool"` message with the matching `tool_call_id`.
+3. Invalid arguments (bad JSON, schema violations, `from_year > to_year`, malformed IDs) and upstream failures come back to the model as `{"error": ...}` tool results, so it can correct itself instead of crashing the request.
+4. The loop ends when the model answers, or after `AGENT_MAX_STEPS` LLM calls (the last call is made with `tool_choice="none"` to force an answer).
+5. The final answer is Structured Output (`summary`, ranked `papers` with reasons, `authors`). Any paper or author ID that no tool actually returned is dropped (grounding) and reported in `agent.dropped_ids`.
+
+The response includes the tool-call trace and token usage. In the web UI, tick **Agent mode** on the search form.
+
+### LLM Provider
+
+All LLM calls go through `backend/llm.py`. Set `LLM_MODEL`, and optionally `LLM_BASE_URL` / `LLM_API_KEY`, to use any OpenAI-compatible provider (e.g. Volcano Engine Ark). If a provider rejects Structured Outputs (`json_schema`), requests fall back to JSON mode, and replies are still validated with Pydantic.
 
 ## Setup and Installation
 
@@ -182,13 +200,18 @@ http {
 ```
 backend/
 ├── api_server.py               # Main Flask API server
+├── agent.py                    # Tool-calling research agent
+├── tools.py                    # Agent tools (schemas + OpenAlex-backed implementations)
+├── llm.py                      # LLM client config and Structured Outputs helpers
 ├── query_processor.py          # Natural language query processing
 ├── literature_searcher.py      # Publication search functionality
 ├── openalex_client.py          # Interface to OpenAlex API
 ├── research_analyzer.py        # Publication analysis functionality
 ├── .env.example                # Environment variable template
 └── .env                        # Your local environment variables (git-ignored)
+tests/                      # Offline unit tests (fake LLM and OpenAlex)
 requirements.txt            # Python dependencies
+requirements-dev.txt        # Test dependencies
 frontend/                   # Static frontend files
 ├── index.html              # Home page with search form
 ├── result.html             # Search results page
@@ -210,6 +233,7 @@ frontend/                   # Static frontend files
 The backend provides the following API endpoints:
 
 - `POST /api/search` - Search for literature based on natural language query
+- `POST /api/agent-search` - Agentic search: the LLM chooses which search tools to call (`options.max_steps` caps LLM calls)
 - `POST /api/advanced-search` - Search with specific research areas and topics
 - `POST /api/interdisciplinary-search` - Specialized search for interdisciplinary research
 - `GET /api/publication/{id}` - Get detailed information about a publication
@@ -232,6 +256,12 @@ The backend provides the following API endpoints:
    ```
 
 3. Test API endpoints using tools like Postman or curl
+
+4. Run the unit tests (offline: the LLM and OpenAlex are faked)
+   ```
+   pip install -r requirements-dev.txt
+   pytest
+   ```
 
 ### Frontend Development
 
