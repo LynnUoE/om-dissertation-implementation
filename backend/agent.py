@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from llm import create_with_schema, parse_reply
 from openalex_client import OpenAlexClient
+from retrieval import Reranker
 from tools import ToolExecutor, tool_result_json
 
 logger = logging.getLogger("ResearchAgent")
@@ -69,6 +70,7 @@ class ResearchAgent:
         format_paper: Callable[[Dict], Dict],
         max_steps: int = 6,
         max_parallel_tools: int = 4,
+        reranker: Optional[Reranker] = None,
     ):
         """
         Args:
@@ -78,6 +80,7 @@ class ResearchAgent:
             format_paper: Turns a raw OpenAlex work into the API's publication dict
             max_steps: Maximum number of LLM calls; the last one must answer
             max_parallel_tools: Maximum tool calls run concurrently
+            reranker: Optional reranker for relevance-sorted search_papers results
         """
         self.llm = llm_client
         self.model = model
@@ -85,11 +88,12 @@ class ResearchAgent:
         self.format_paper = format_paper
         self.max_steps = max_steps
         self.max_parallel_tools = max_parallel_tools
+        self.reranker = reranker
 
     def run(self, query: str, max_steps: Optional[int] = None) -> Dict:
         start = time.time()
         max_steps = max(2, min(max_steps or self.max_steps, 10))
-        executor = ToolExecutor(self.openalex_client)
+        executor = ToolExecutor(self.openalex_client, reranker=self.reranker)
         messages: List[Dict] = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": query},

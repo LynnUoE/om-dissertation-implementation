@@ -17,8 +17,10 @@ import openai
 from pydantic import BaseModel, Field, ValidationError
 
 from openalex_client import OpenAlexClient, reconstruct_abstract
+from retrieval import Reranker, rerank, title_key
 
 MAX_LIMIT = 25
+RERANK_POOL = 50  # With a reranker, relevance searches fetch this many results and keep the best `limit`
 ABSTRACT_CHARS = 600
 
 PAPER_SORTS = {
@@ -119,8 +121,9 @@ def compact_author(author: Dict) -> Dict:
 class ToolExecutor:
     """Runs tool calls against OpenAlex and tracks what was returned."""
 
-    def __init__(self, openalex_client: OpenAlexClient):
+    def __init__(self, openalex_client: OpenAlexClient, reranker: Optional[Reranker] = None):
         self.client = openalex_client
+        self.reranker = reranker  # Optional: reorders relevance-sorted search_papers results
         self.seen_papers: Dict[str, Dict] = {}   # short work ID -> raw OpenAlex work
         self.seen_authors: Dict[str, Dict] = {}  # short author ID -> compact author
 
@@ -170,19 +173,24 @@ class ToolExecutor:
         if p.min_citations is not None and p.min_citations < 0:
             raise ToolError("min_citations must be >= 0")
 
+        limit = self._clamp(p.limit)
+        use_reranker = self.reranker is not None and p.sort == "relevance"
         response = self.client.search_works(
             query=query,
             from_year=p.from_year,
             to_year=p.to_year,
             min_citations=p.min_citations,
             sort=PAPER_SORTS[p.sort],
-            per_page=self._clamp(p.limit),
+            per_page=RERANK_POOL if use_reranker else limit,
         )
         if response.error:
             raise ToolError(f"OpenAlex search failed: {response.error}")
+        works = [w for w in response.data.get("results", []) if w]
+        if use_reranker:
+            works = [work for work, _ in rerank(query, works, self.reranker)]
         return {
             "total_matches": (response.meta or {}).get("count"),
-            "papers": self._remember_papers(response.data.get("results", [])),
+            "papers": self._remember_papers(works, limit),
         }
 
     def get_paper(self, p: GetPaper) -> Dict:
@@ -238,14 +246,17 @@ class ToolExecutor:
     def _clamp(limit: int) -> int:
         return max(1, min(limit, MAX_LIMIT))
 
-    def _remember_papers(self, works: List[Dict]) -> List[Dict]:
+    def _remember_papers(self, works: List[Dict], limit: Optional[int] = None) -> List[Dict]:
+        """Compact the first `limit` unique works and record them as returned to the model."""
         papers, titles = [], set()
         for work in works:
+            if limit is not None and len(papers) >= limit:
+                break
             # OpenAlex often lists a preprint and its published version as separate works
-            title = (work or {}).get("title") or ""
-            if not work or title.strip().lower() in titles:
+            key = title_key((work or {}).get("title"))
+            if not work or key in titles:
                 continue
-            titles.add(title.strip().lower())
+            titles.add(key)
             self.seen_papers[_short_id(work.get("id"))] = work
             papers.append(compact_paper(work))
         return papers

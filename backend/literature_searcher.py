@@ -5,8 +5,10 @@ import json
 from dataclasses import dataclass, field, asdict
 
 # Import from project components
-from openalex_client import create_client, OpenAlexClient, reconstruct_abstract
+from openalex_client import create_client, OpenAlexClient, WorkResult, reconstruct_abstract
 from llm import DEFAULT_LLM_MODEL
+from retrieval import (RECALL_SEARCHES, MemoReranker, Reranker, create_reranker, expand_by_citations, recall,
+                       rerank)
 from query_processor import create_query_processor, QueryProcessor
 from research_analyzer import create_analyzer, ResearchAnalyzer
 
@@ -32,6 +34,9 @@ class LiteratureSearchResult:
         """Convert to dictionary for API responses"""
         return asdict(self)
 
+RETRIEVAL_STRATEGIES = ('multi_query', 'single_query')
+MAX_SEARCH_QUERIES = 5
+
 class LiteratureSearcher:
     """
     Literature search orchestrator that integrates query processing,
@@ -45,7 +50,12 @@ class LiteratureSearcher:
         openalex_api_key: Optional[str] = None,
         cache_duration: int = 24,  # Cache duration in hours
         llm_model: str = DEFAULT_LLM_MODEL,
-        llm_base_url: Optional[str] = None
+        llm_base_url: Optional[str] = None,
+        retrieval_strategy: str = 'multi_query',
+        reranker: Optional[Reranker] = None,
+        citation_weight: float = 0.0,
+        recall_per_query: int = 25,
+        citation_expansion: bool = False
     ):
         """
         Initialize the literature searcher
@@ -57,12 +67,29 @@ class LiteratureSearcher:
             cache_duration: Duration in hours to cache results
             llm_model: Chat model name (or provider endpoint ID)
             llm_base_url: Optional OpenAI-compatible API base URL
+            retrieval_strategy: 'multi_query' (several focused OpenAlex searches, then rerank)
+                or 'single_query' (the original pipeline: one long keyword query and
+                term-overlap scoring)
+            reranker: Scores multi_query candidates against the request; None keeps
+                the reciprocal rank fusion order
+            citation_weight: Weight of the citation prior in the final multi_query score (0-1)
+            recall_per_query: Results fetched per focused query and sort order
+            citation_expansion: Also consider papers cited by several of the top
+                multi_query candidates (needs a reranker; one extra OpenAlex request)
         """
+        if retrieval_strategy not in RETRIEVAL_STRATEGIES:
+            raise ValueError(f"retrieval_strategy must be one of {RETRIEVAL_STRATEGIES}")
         # Initialize components
         self.query_processor = create_query_processor(openai_api_key, llm_model, llm_base_url)
         self.openalex_client = create_client(email_for_openalex, openalex_api_key)
         self.research_analyzer = create_analyzer(openai_api_key, llm_model, llm_base_url)
         self.cache_duration = cache_duration
+        self.retrieval_strategy = retrieval_strategy
+        self.reranker = reranker
+        self.citation_weight = citation_weight
+        self.recall_per_query = recall_per_query
+        self.recall_searches = RECALL_SEARCHES
+        self.citation_expansion = citation_expansion
         
         # Setup result cache
         self.result_cache = {}
@@ -164,62 +191,36 @@ class LiteratureSearcher:
                     }
                 }
             
-            # Determine time window based on query or defaults
-            if not from_year and 'temporal_context' in structured_query:
-                temporal_context = structured_query['temporal_context']
-                from_year = self._extract_year_from_temporal_context(temporal_context)
+            from_year, to_year = self.resolve_year_range(structured_query, from_year, to_year)
             
-            if not to_year:
-                to_year = datetime.now().year
-            
-            # Prepare search parameters
-            search_terms = self._extract_search_terms(structured_query)
-            search_query = " ".join(search_terms)
-            
-            # Execute search query
             search_start_time = datetime.now()
-            
-            response = self.openalex_client.search_works(
-                query=search_query,
-                from_year=from_year,
-                to_year=to_year,
-                per_page=max_results * 3,  # Request more to filter later
-                sort="cited_by_count:desc" if min_citations else "relevance_score:desc",
-                min_citations=min_citations
-            )
-            
-            search_time = (datetime.now() - search_start_time).total_seconds()
-            self.logger.info(f"OpenAlex search completed in {search_time:.2f}s")
-            
-            if response.error:
-                self.logger.error(f"OpenAlex API error: {response.error}")
+            try:
+                if self.retrieval_strategy == 'single_query':
+                    candidate_count, limited_results = self._single_query_search(
+                        structured_query, max_results, from_year, to_year, min_citations,
+                        publication_types, open_access_only)
+                else:
+                    candidates = self.retrieve_candidates(structured_query, from_year, to_year, min_citations)
+                    candidate_count = len(candidates)
+                    limited_results = self.rank_candidates(
+                        query, candidates, structured_query, max_results, publication_types, open_access_only,
+                        from_year, to_year, min_citations)
+            except RuntimeError as e:  # OpenAlex failed
+                self.logger.error(f"OpenAlex API error: {e}")
                 return {
                     'status': 'error',
-                    'message': f'Error from OpenAlex API: {response.error}',
+                    'message': f'Error from OpenAlex API: {e}',
                     'http_status': 502,
                     'original_query': query,
                     'structured_query': structured_query,
                     'results': [],
                     'metadata': {
                         'total_results': 0,
-                        'processing_time': query_processing_time + search_time
+                        'processing_time': (datetime.now() - query_start_time).total_seconds()
                     }
                 }
-            
-            # Process search results
-            work_results = response.get_works()
-            
-            # Convert to LiteratureSearchResult objects
-            literature_results = self._process_work_results(
-                work_results,
-                structured_query,
-                publication_types,
-                open_access_only
-            )
-            
-            # Sort by relevance score and limit results
-            literature_results.sort(key=lambda x: (x.relevance_score, x.citations), reverse=True)
-            limited_results = literature_results[:max_results]
+            self.logger.info(f"Retrieval ({self.retrieval_strategy}) completed in "
+                             f"{(datetime.now() - search_start_time).total_seconds():.2f}s")
             
             # Set empty analysis results - NEVER perform analysis during search
             analysis_results = None
@@ -232,7 +233,7 @@ class LiteratureSearcher:
                 'structured_query': structured_query,
                 'results': [result.to_dict() for result in limited_results],
                 'metadata': {
-                    'total_results': len(work_results),
+                    'total_results': candidate_count,
                     'returned_results': len(limited_results),
                     'from_year': from_year,
                     'to_year': to_year,
@@ -257,6 +258,124 @@ class LiteratureSearcher:
                     'processing_time': -1
                 }
             }
+    
+    def resolve_year_range(
+        self,
+        structured_query: Dict,
+        from_year: Optional[int] = None,
+        to_year: Optional[int] = None
+    ) -> tuple:
+        """Explicit years win; otherwise from_year comes from the query's temporal context"""
+        if not from_year and 'temporal_context' in structured_query:
+            from_year = self._extract_year_from_temporal_context(structured_query['temporal_context'])
+        return from_year, to_year or datetime.now().year
+    
+    def retrieve_candidates(
+        self,
+        structured_query: Dict,
+        from_year: Optional[int] = None,
+        to_year: Optional[int] = None,
+        min_citations: Optional[int] = None
+    ) -> List[Dict]:
+        """
+        Stage 1 of multi_query retrieval: run the focused search queries against
+        OpenAlex and return unique raw works in fused rank order. Raises
+        RuntimeError if OpenAlex fails.
+        """
+        queries = self._search_queries(structured_query)
+        self.logger.info(f"Recall queries: {queries}")
+        return recall(self.openalex_client, queries, from_year=from_year, to_year=to_year,
+                      min_citations=min_citations, per_query=self.recall_per_query,
+                      searches=self.recall_searches)
+    
+    def rank_candidates(
+        self,
+        query: str,
+        candidates: List[Dict],
+        structured_query: Dict,
+        max_results: int,
+        publication_types: Optional[List[str]] = None,
+        open_access_only: bool = False,
+        from_year: Optional[int] = None,
+        to_year: Optional[int] = None,
+        min_citations: Optional[int] = None
+    ) -> List[LiteratureSearchResult]:
+        """
+        Stage 2 of multi_query retrieval: apply the type/open-access filters,
+        rerank against the original query and return the top results. With
+        citation expansion, papers co-cited by the top candidates are fetched
+        (with the same year/citation filters), scored and merged in.
+        """
+        def keep(works: List[Dict]) -> List[Dict]:
+            kept = []
+            for work in works:
+                parsed = WorkResult.from_api_response(work)
+                if publication_types and self._determine_publication_type(parsed) not in publication_types:
+                    continue
+                if open_access_only and not parsed.is_open_access:
+                    continue
+                kept.append(work)
+            return kept
+        
+        kept = keep(candidates)
+        reranker = MemoReranker(self.reranker) if self.reranker else None
+        ranked = rerank(query, kept, reranker, citation_weight=self.citation_weight)
+        if self.citation_expansion and reranker:
+            cited = keep(expand_by_citations(self.openalex_client, [w for w, _ in ranked], from_year=from_year,
+                                             to_year=to_year, min_citations=min_citations))
+            self.logger.info(f"Citation expansion added {len(cited)} candidates")
+            if cited:
+                ranked = rerank(query, kept + cited, reranker, citation_weight=self.citation_weight)
+        ranked = ranked[:max_results]
+        query_terms = self._query_terms(structured_query)
+        return [
+            self._to_search_result(WorkResult.from_api_response(work), query_terms, relevance_score=round(score, 4))
+            for work, score in ranked
+        ]
+    
+    def _search_queries(self, structured_query: Dict) -> List[str]:
+        """Focused queries for recall; falls back to the extracted topics when the LLM gave none"""
+        queries = structured_query.get('search_queries') or []
+        if not queries:
+            queries = (structured_query.get('expertise') or [])[:4] + (structured_query.get('research_areas') or [])[:1]
+        return queries[:MAX_SEARCH_QUERIES]
+    
+    def _single_query_search(
+        self,
+        structured_query: Dict,
+        max_results: int,
+        from_year: Optional[int],
+        to_year: Optional[int],
+        min_citations: Optional[int],
+        publication_types: Optional[List[str]],
+        open_access_only: bool
+    ) -> tuple:
+        """
+        The original pipeline, kept as the evaluation baseline: all extracted terms
+        joined into one OpenAlex query, ranked by term overlap plus a citation factor.
+        Returns (number of works fetched, top results). Raises RuntimeError if OpenAlex fails.
+        """
+        search_query = " ".join(self._extract_search_terms(structured_query))
+        response = self.openalex_client.search_works(
+            query=search_query,
+            from_year=from_year,
+            to_year=to_year,
+            per_page=max_results * 3,  # Request more to filter later
+            sort="cited_by_count:desc" if min_citations else "relevance_score:desc",
+            min_citations=min_citations
+        )
+        if response.error:
+            raise RuntimeError(response.error)
+        
+        work_results = response.get_works()
+        literature_results = self._process_work_results(
+            work_results,
+            structured_query,
+            publication_types,
+            open_access_only
+        )
+        literature_results.sort(key=lambda x: (x.relevance_score, x.citations), reverse=True)
+        return len(work_results), literature_results[:max_results]
     
     def analyze_single_publication(self, publication_id: str, query_context: Optional[Dict] = None) -> Dict:
         """
@@ -383,111 +502,33 @@ class LiteratureSearcher:
     
     def get_publication_details(self, publication_id: str) -> Dict:
         """
-        Get detailed information about a specific publication
-        
-        Args:
-            publication_id: Identifier for the publication
-                
-        Returns:
-            Dictionary with publication details
+        Get one publication by OpenAlex ID or DOI, plus its most-cited references.
+        The lookup is free in OpenAlex; the references cost one list request.
         """
         try:
             self.logger.info(f"Getting detailed information for publication {publication_id}")
+            response = self.openalex_client.get_work(publication_id)
+            if response.status_code == 404:
+                return {
+                    'status': 'error',
+                    'message': f'No publication found with id {publication_id}',
+                    'http_status': 404,
+                    'publication_id': publication_id
+                }
+            if response.error:
+                self.logger.error(f"OpenAlex API error: {response.error}")
+                return {
+                    'status': 'error',
+                    'message': f'Error retrieving publication details: {response.error}',
+                    'http_status': 502,
+                    'publication_id': publication_id
+                }
             
-            # Handle DOI URLs by extracting the DOI
-            if publication_id.startswith("https://doi.org/"):
-                doi = publication_id.replace("https://doi.org/", "")
-                self.logger.info(f"Extracted DOI from URL: {doi}")
-                
-                # Search for publications with this DOI using the existing method
-                response = self.openalex_client.search_works(
-                    query=f'',  # Empty query
-                    filter_string=f'doi:{doi}'  # Use filter instead for exact DOI match
-                )
-                
-                if response.error:
-                    self.logger.error(f"OpenAlex API error: {response.error}")
-                    return {
-                        'status': 'error',
-                        'message': f'Error retrieving publication by DOI: {response.error}',
-                        'http_status': 502,
-                        'publication_id': publication_id
-                    }
-                
-                work_results = response.get_works()
-                if not work_results or len(work_results) == 0:
-                    return {
-                        'status': 'error',
-                        'message': f'No publication found with DOI: {doi}',
-                        'http_status': 404,
-                        'publication_id': publication_id
-                    }
-                
-                # Use DOI as the identifier since WorkResult doesn't have an id attribute
-                # We'll continue with the original DOI URL
-                self.logger.info(f"Found work with DOI: {doi}")
-            
-            # Make a direct request for the publication details using the ID/DOI
-            # If it's a DOI URL, use it directly in the OpenAlex API request
-            if publication_id.startswith("https://doi.org/"):
-                # Format a request using the DOI filter
-                doi = publication_id.replace("https://doi.org/", "")
-                response = self.openalex_client.search_works(
-                    query="",
-                    filter_string=f'doi:{doi}',
-                    per_page=1
-                )
-                
-                if response.error:
-                    self.logger.error(f"OpenAlex API error: {response.error}")
-                    return {
-                        'status': 'error',
-                        'message': f'Error retrieving publication details by DOI: {response.error}',
-                        'http_status': 502,
-                        'publication_id': publication_id
-                    }
-                
-                work_results = response.get_works()
-                if not work_results or len(work_results) == 0:
-                    return {
-                        'status': 'error',
-                        'message': f'No publication found with DOI: {doi}',
-                        'http_status': 404,
-                        'publication_id': publication_id
-                    }
-                
-                # Use the first result as the publication data
-                work = work_results[0]
-                publication = self._create_publication_from_work(work)
-                
-                # Since we have a limited work result, we can't get related publications
-                related_publications = []
-            else:
-                # For non-DOI identifiers, continue with the standard approach
-                response = self.openalex_client._make_request(f"works/{publication_id}")
-                
-                if response.error:
-                    self.logger.error(f"OpenAlex API error: {response.error}")
-                    return {
-                        'status': 'error',
-                        'message': f'Error retrieving publication details: {response.error}',
-                        'http_status': 502,
-                        'publication_id': publication_id
-                    }
-                
-                # Extract publication data from response
-                publication_data = response.data
-                
-                # Process publication data into a structured format
-                publication = self._process_publication_data(publication_data)
-                
-                # Get related publications
-                related_publications = self._get_related_publications(publication_data, max_related=3)
-            
+            publication = self._process_publication_data(response.data)
             return {
                 'status': 'success',
                 'publication': publication.to_dict(),
-                'related_publications': related_publications
+                'references': self._get_top_references(response.data, limit=5)
             }
             
         except Exception as e:
@@ -497,38 +538,6 @@ class LiteratureSearcher:
                 'message': f'Error processing publication details: {str(e)}',
                 'publication_id': publication_id
             }
-    
-    def _create_publication_from_work(self, work: Any) -> LiteratureSearchResult:
-        """
-        Create a LiteratureSearchResult from a work object returned by search
-        
-        Args:
-            work: Work result from search
-            
-        Returns:
-            LiteratureSearchResult object
-        """
-        # Generate topic matches and relevance score
-        topic_matches = {}  # We don't have topic matches for this basic case
-        
-        # Create result with available fields from the WorkResult
-        result = LiteratureSearchResult(
-            id=work.doi if work.doi else f"W{hash(work.title) & 0xffffffff}",
-            title=work.title,
-            authors=work.authors,
-            publication_date=work.publication_date,
-            journal=work.journal,
-            abstract=work.abstract,
-            doi=work.doi,
-            citations=work.citations,
-            open_access=work.is_open_access,
-            type=self._determine_publication_type(work),
-            topic_matches=topic_matches,
-            relevance_score=1.0,  # Default for direct lookups
-            url=work.doi  # OpenAlex DOIs are already full https://doi.org/ URLs
-        )
-        
-        return result
     
     def interdisciplinary_search(
         self,
@@ -762,48 +771,56 @@ class LiteratureSearcher:
             List of LiteratureSearchResult objects
         """
         literature_results = []
+        query_terms = self._query_terms(structured_query)
         
-        # Extract query terms for relevance scoring
+        for work in work_results:
+            # Skip if filtered by publication type
+            if publication_types and self._determine_publication_type(work) not in publication_types:
+                continue
+                
+            # Skip if not open access and open access filter is active
+            if open_access_only and not work.is_open_access:
+                continue
+            
+            literature_results.append(self._to_search_result(work, query_terms))
+        
+        return literature_results
+    
+    @staticmethod
+    def _query_terms(structured_query: Dict) -> set:
+        """Lower-cased extracted terms, used for topic matches and term-overlap scoring"""
         query_terms = set()
         for key in ['research_areas', 'expertise', 'search_keywords']:
             if key in structured_query:
                 query_terms.update(term.lower() for term in structured_query[key])
-        
-        # Process each work
-        for work in work_results:
-            # Skip if filtered by publication type
-            work_type = self._determine_publication_type(work)
-            if publication_types and work_type not in publication_types:
-                continue
-                
-            # Skip if not open access and open access filter is active
-            is_open_access = work.is_open_access
-            if open_access_only and not is_open_access:
-                continue
-            
-            # Generate topic matches and relevance score
-            topic_matches, relevance_score = self._calculate_relevance(work, query_terms)
-            
-            # Create result
-            result = LiteratureSearchResult(
-                id=work.doi if work.doi else f"W{hash(work.title) & 0xffffffff}",
-                title=work.title,
-                authors=work.authors,
-                publication_date=work.publication_date,
-                journal=work.journal,
-                abstract=work.abstract,
-                doi=work.doi,
-                citations=work.citations,
-                open_access=is_open_access,
-                type=work_type,
-                topic_matches=topic_matches,
-                relevance_score=relevance_score,
-                url=work.doi  # OpenAlex DOIs are already full https://doi.org/ URLs
-            )
-            
-            literature_results.append(result)
-        
-        return literature_results
+        return query_terms
+    
+    def _to_search_result(
+        self,
+        work: WorkResult,
+        query_terms: set,
+        relevance_score: Optional[float] = None
+    ) -> LiteratureSearchResult:
+        """
+        Convert a WorkResult. relevance_score defaults to the term-overlap
+        heuristic; topic_matches (shown as keywords in the UI) always come from it.
+        """
+        topic_matches, overlap_score = self._calculate_relevance(work, query_terms)
+        return LiteratureSearchResult(
+            id=work.openalex_id or work.doi or '',
+            title=work.title,
+            authors=work.authors,
+            publication_date=work.publication_date,
+            journal=work.journal,
+            abstract=work.abstract,
+            doi=work.doi,
+            citations=work.citations,
+            open_access=work.is_open_access,
+            type=self._determine_publication_type(work),
+            topic_matches=topic_matches,
+            relevance_score=overlap_score if relevance_score is None else relevance_score,
+            url=work.doi  # OpenAlex DOIs are already full https://doi.org/ URLs
+        )
     
     def format_publication(self, publication_data: Dict) -> Dict:
         """Convert a raw OpenAlex work into the API's publication dict"""
@@ -829,11 +846,12 @@ class LiteratureSearcher:
         source = (publication_data.get('primary_location') or {}).get('source') or {}
         journal = source.get('display_name')
         
-        # Extract concepts for topic matches
-        topic_matches = {}
-        for concept in publication_data.get('concepts', []):
-            if 'display_name' in concept and 'score' in concept:
-                topic_matches[concept['display_name']] = concept['score']
+        # OpenAlex topics (the older "concepts" field is often off-topic)
+        topic_matches = {
+            topic['display_name']: topic.get('score', 0)
+            for topic in publication_data.get('topics') or []
+            if topic.get('display_name')
+        }
         
         # Determine publication type
         pub_type = self._determine_publication_type_from_data(publication_data)
@@ -846,7 +864,7 @@ class LiteratureSearcher:
         url = doi
         
         return LiteratureSearchResult(
-            id=publication_data.get('id', ''),
+            id=(publication_data.get('id') or '').replace('https://openalex.org/', ''),
             title=publication_data.get('title', 'Untitled Publication'),
             abstract=reconstruct_abstract(publication_data.get('abstract_inverted_index')),
             authors=authors,
@@ -861,50 +879,34 @@ class LiteratureSearcher:
             url=url
         )
     
-    def _get_related_publications(
-        self, 
-        publication_data: Dict,
-        max_related: int = 3
-    ) -> List[Dict]:
+    def _get_top_references(self, publication_data: Dict, limit: int = 5) -> Optional[List[Dict]]:
         """
-        Extract related publications from OpenAlex publication data
-        
-        Args:
-            publication_data: Publication data from OpenAlex
-            max_related: Maximum number of related publications to return
-            
-        Returns:
-            List of related publication dictionaries
+        The most-cited works this publication cites, in one OpenAlex request.
+        (OpenAlex's own related_works are often unrelated, so they aren't used.)
+        Returns [] if the paper lists no references and None if the request fails.
         """
-        related_publications = []
-        
-        # In a real implementation, this would extract related publications
-        # from the "related_works" field or make additional API calls
-        
-        # Simplified implementation for demonstration
-        if 'related_works' in publication_data:
-            for i, related_id in enumerate(publication_data['related_works']):
-                if i >= max_related:
-                    break
-                    
-                try:
-                    response = self.openalex_client._make_request(f"works/{related_id}")
-                    
-                    if not response.error:
-                        related_data = response.data
-                        
-                        related_publications.append({
-                            'id': related_data.get('id', ''),
-                            'title': related_data.get('title', 'Untitled Publication'),
-                            'authors': [a.get('author', {}).get('display_name', '') 
-                                        for a in related_data.get('authorships', [])[:3]],
-                            'publication_date': related_data.get('publication_date', None),
-                            'journal': related_data.get('primary_location', {}).get('source', {}).get('display_name', None)
-                        })
-                except Exception as e:
-                    self.logger.error(f"Error fetching related publication: {str(e)}")
-        
-        return related_publications
+        ids = [ref.replace('https://openalex.org/', '') for ref in (publication_data.get('referenced_works') or [])]
+        if not ids:
+            return []
+        # A filter accepts up to 100 OR-ed values
+        response = self.openalex_client.search_works(
+            query='', filter_string='ids.openalex:' + '|'.join(ids[:100]),
+            sort='cited_by_count:desc', per_page=limit
+        )
+        if response.error:
+            self.logger.warning(f"Error fetching references: {response.error}")
+            return None
+        return [
+            {
+                'id': (work.get('id') or '').replace('https://openalex.org/', ''),
+                'title': work.get('title') or 'Untitled Publication',
+                'authors': [(a.get('author') or {}).get('display_name', '') for a in (work.get('authorships') or [])[:3]],
+                'publication_date': work.get('publication_date'),
+                'journal': ((work.get('primary_location') or {}).get('source') or {}).get('display_name'),
+                'citations': work.get('cited_by_count', 0)
+            }
+            for work in (response.data or {}).get('results') or []
+        ]
     
     def _create_interdisciplinary_synthesis(
         self,
@@ -1255,8 +1257,20 @@ def create_literature_searcher(
     email_for_openalex: str,
     openalex_api_key: Optional[str] = None,
     llm_model: str = DEFAULT_LLM_MODEL,
-    llm_base_url: Optional[str] = None
+    llm_base_url: Optional[str] = None,
+    retrieval_strategy: str = 'multi_query',
+    reranker: Optional[str] = None,
+    citation_weight: float = 0.0,
+    citation_expansion: bool = False
 ) -> LiteratureSearcher:
-    """Factory function to create a LiteratureSearcher instance"""
-    return LiteratureSearcher(openai_api_key, email_for_openalex, openalex_api_key,
-                              llm_model=llm_model, llm_base_url=llm_base_url)
+    """
+    Factory function to create a LiteratureSearcher instance.
+    reranker is a spec string for retrieval.create_reranker, e.g. "cross-encoder".
+    """
+    searcher = LiteratureSearcher(openai_api_key, email_for_openalex, openalex_api_key,
+                                  llm_model=llm_model, llm_base_url=llm_base_url,
+                                  retrieval_strategy=retrieval_strategy, citation_weight=citation_weight,
+                                  citation_expansion=citation_expansion)
+    # The embedding reranker reuses the LLM provider's client
+    searcher.reranker = create_reranker(reranker, llm_client=searcher.query_processor.client)
+    return searcher

@@ -8,6 +8,7 @@ venv/
 .env
 
 # Runtime output
+eval/.cache/
 *.log
 publication_results.json
 

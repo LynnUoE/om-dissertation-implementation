@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from openalex_client import OpenAlexClient
 from tools import MAX_LIMIT, ToolExecutor
 
@@ -99,3 +101,37 @@ def test_duplicate_titles_are_collapsed():
     works = [make_work(1, title="SignalP 6.0"), make_work(2, title="signalp 6.0 "), make_work(3)]
     papers = ToolExecutor(FakeOpenAlex(works)).execute("search_papers", search_args())["papers"]
     assert [p["paper_id"] for p in papers] == ["W1", "W3"]
+
+
+class FakeHTTPResponse:
+    def __init__(self, status_code, headers=None, body=None):
+        self.status_code, self.headers = status_code, headers or {}
+        self.content = b"{}"
+        self.text = "{}"
+        self._body = body or {}
+
+    def json(self):
+        return self._body
+
+
+def test_exhausted_daily_budget_fails_fast(monkeypatch):
+    client = OpenAlexClient("test@example.com")
+    client.logger.disabled = True
+    responses = [FakeHTTPResponse(429, {"Retry-After": "17818"}, {"message": "Rate limit exceeded"})]
+    client.session.request = lambda *a, **kw: responses.pop(0)
+    monkeypatch.setattr("openalex_client.time.sleep", lambda s: pytest.fail(f"slept {s}s"))
+
+    response = client.search_works("x")
+    assert response.status_code == 429 and "resets in 4.9 hours" in response.error
+
+
+def test_short_rate_limit_is_retried(monkeypatch):
+    client = OpenAlexClient("test@example.com")
+    client.logger.disabled = True
+    responses = [FakeHTTPResponse(429, {"Retry-After": "2"}), FakeHTTPResponse(200, body={"results": []})]
+    client.session.request = lambda *a, **kw: responses.pop(0)
+    slept = []
+    monkeypatch.setattr("openalex_client.time.sleep", slept.append)
+
+    response = client.search_works("x")
+    assert response.error is None and slept[0] == 2.0

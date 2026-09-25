@@ -29,6 +29,7 @@ class WorkResult:
     source_type: Optional[str] = None  # OpenAlex source type: journal, conference, repository...
     work_type: Optional[str] = None  # OpenAlex work type: article, preprint, review...
     is_open_access: bool = False
+    openalex_id: Optional[str] = None  # Short form, e.g. W2741809807
     
     @classmethod
     def from_api_response(cls, data: Dict) -> 'WorkResult':
@@ -65,7 +66,8 @@ class WorkResult:
             journal=source.get('display_name'),
             source_type=source.get('type'),
             work_type=data.get('type'),
-            is_open_access=bool((data.get('open_access') or {}).get('is_oa'))
+            is_open_access=bool((data.get('open_access') or {}).get('is_oa')),
+            openalex_id=(data.get('id') or '').replace('https://openalex.org/', '') or None
         )
 
 @dataclass
@@ -105,12 +107,15 @@ class OpenAlexClient:
     """Client for interacting with the OpenAlex API"""
     
     def __init__(self, email: str, api_key: Optional[str] = None,
-                 max_retries: int = 3, rate_limit_delay: float = 1.0):
+                 max_retries: int = 3, rate_limit_delay: float = 1.0, max_retry_wait: float = 30.0):
         self.base_url = "https://api.openalex.org"
         self.email = email
         self.api_key = api_key  # Optional; avoids the anonymous search rate limit
         self.max_retries = max_retries
         self.rate_limit_delay = rate_limit_delay
+        # Longest Retry-After worth waiting for. OpenAlex bills requests against a daily
+        # budget; when it runs out, Retry-After is the time until the reset (hours).
+        self.max_retry_wait = max_retry_wait
         
         self.session = requests.Session()
         self.session.headers.update({
@@ -171,6 +176,13 @@ class OpenAlexClient:
                     
                     if response.status_code == 429:
                         wait_time = float(response.headers.get('Retry-After', self.rate_limit_delay * 2))
+                        if wait_time > self.max_retry_wait:
+                            return OpenAlexResponse(
+                                status_code=429,
+                                data={},
+                                error=f"OpenAlex daily request budget exhausted; it resets in "
+                                      f"{wait_time / 3600:.1f} hours"
+                            )
                         self.logger.warning(f"Rate limit exceeded. Waiting {wait_time} seconds.")
                         time.sleep(wait_time)
                         continue
