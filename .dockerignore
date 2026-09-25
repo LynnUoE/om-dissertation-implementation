@@ -1,0 +1,17 @@
+.git
+.venv
+venv
+**/__pycache__
+**/*.py[cod]
+.pytest_cache
+.DS_Store
+
+# Secrets are passed at runtime, never baked into the image
+**/.env
+
+# Not needed to run the app
+eval
+tests
+config
+nginx.conf
+*.md

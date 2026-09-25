@@ -1,0 +1,34 @@
+# docker compose up --build                     web app at http://localhost:5001
+# docker compose --profile mcp up --build       also the MCP server at http://localhost:8000/mcp
+#
+# Host ports can be changed with LITFINDER_PORT and LITFINDER_MCP_PORT.
+# Settings and API keys are read from backend/.env (copy backend/.env.example).
+services:
+  web:
+    build: .
+    image: litfinder
+    env_file: backend/.env
+    environment:
+      DEBUG: "false"
+      HOST: 0.0.0.0
+      PORT: "5001"
+    ports:
+      # Localhost only: the app has no login and spends your API credits
+      - "127.0.0.1:${LITFINDER_PORT:-5001}:5001"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5001/api/health_check')"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    restart: unless-stopped
+
+  mcp:
+    image: litfinder
+    profiles: [mcp]
+    depends_on: [web]  # web builds the shared image
+    env_file: backend/.env
+    command: ["python", "backend/mcp_server.py", "--transport", "http", "--host", "0.0.0.0", "--port", "8000"]
+    ports:
+      - "127.0.0.1:${LITFINDER_MCP_PORT:-8000}:8000"
+    restart: unless-stopped
