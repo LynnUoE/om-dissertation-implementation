@@ -7,8 +7,8 @@
 const LOADING_STEPS = {
     search: [
         { label: 'Understanding your request', at: 0 },
-        { label: 'Searching OpenAlex', at: 3 },
-        { label: 'Ranking papers by relevance', at: 6 },
+        { label: 'Searching OpenAlex by meaning', at: 2 },
+        { label: 'Ranking papers by relevance', at: 4 },
     ],
     agent: [
         { label: 'Planning searches', at: 0 },
@@ -97,7 +97,7 @@ function showProgress(controller) {
             <div class="spinner" aria-hidden="true"></div>
             <div class="loading-text" style="flex:1">
                 <h2>${state.search.mode === 'agent' ? 'The agent is researching your question' : 'Finding papers'}</h2>
-                <p><span id="elapsed">0</span> s · ${state.search.mode === 'agent' ? 'usually 20-60 s' : 'usually 5-10 s'}</p>
+                <p><span id="elapsed">0</span> s · ${state.search.mode === 'agent' ? 'usually 20-60 s' : 'usually about 5 s'}</p>
                 <ul class="loading-steps">
                     ${steps.map((s, i) => `<li data-step="${i}"><i class="far fa-circle"></i> ${s.label}</li>`).join('')}
                 </ul>
@@ -190,16 +190,22 @@ function showResults(result) {
     renderList();
 }
 
-/** Show which focused queries the pipeline actually ran */
+/** Show what the pipeline actually searched for (metadata.recall from the API) */
 function renderQueryPlan(result) {
     const plan = document.getElementById('query-plan');
-    const queries = (result.structured_query || {}).search_queries || [];
-    if (!queries.length) {
+    const recall = (result.metadata || {}).recall;
+    const chips = [];
+    if (recall) {
+        if (recall.semantic_query) chips.push('<i class="fas fa-brain"></i> Semantic search on your request');
+        (recall.queries || []).forEach(q => chips.push(escapeHtml(q)));
+        if (recall.citation_expansion) chips.push('<i class="fas fa-diagram-project"></i> + papers the best matches cite most');
+    }
+    if (!chips.length) {
         plan.hidden = true;
         return;
     }
-    plan.innerHTML = `<span><i class="fas fa-diagram-project"></i> Searched OpenAlex for</span>` +
-        queries.map(q => `<span class="chip chip-static">${escapeHtml(q)}</span>`).join('');
+    plan.innerHTML = '<span><i class="fas fa-magnifying-glass"></i> Searched OpenAlex with</span>' +
+        chips.map(c => `<span class="chip chip-static">${c}</span>`).join('');
     plan.hidden = false;
 }
 

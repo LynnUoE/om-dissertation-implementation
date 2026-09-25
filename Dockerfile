@@ -14,6 +14,9 @@ RUN pip install -r requirements.txt gunicorn
 
 # Bake the default reranker into the image so containers start without downloading it
 RUN python -c "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')"
+# The model is in the image, so don't contact Hugging Face at startup.
+# Set HF_HUB_OFFLINE=0 when switching RERANKER to a model that isn't baked in.
+ENV HF_HUB_OFFLINE=1
 
 COPY backend/ backend/
 COPY frontend/ frontend/

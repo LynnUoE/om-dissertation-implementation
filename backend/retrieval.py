@@ -1,21 +1,25 @@
 """
-Two-stage retrieval: recall candidates with several focused OpenAlex queries,
-then rerank them against the user's original request.
+Retrieval: recall candidates from OpenAlex, then rerank them against the
+user's original request.
 
 OpenAlex keyword search matches (nearly) every query term, so one long query
-built from many extracted keywords returns few or no results. Instead:
+built from many extracted keywords returns few or no results. The pipeline
+search strategies (see LiteratureSearcher) combine these steps instead:
 
-  1. Recall: run each focused query (2-6 key terms) twice, in parallel: a
-     full-text search sorted by relevance, and a title/abstract search sorted
-     by citations (a full-text search sorted by citations mostly returns
-     famous papers that merely mention the terms). Candidates are merged and
-     ordered by reciprocal rank fusion (RRF) across the result lists.
-  2. Rerank: score each candidate's title + abstract against the original
-     request with an embedding model or a cross-encoder.
-  3. Optional citation expansion (snowballing): foundational papers are often
-     missing from keyword results but cited by many of the best candidates.
-     Papers cited by several of the top-ranked candidates are fetched in one
-     request, reranked with the rest, and can enter the final list.
+  1. Recall, one of:
+     - semantic (default): the user's whole request goes to OpenAlex's
+       semantic (embedding) search, which matches meaning rather than words.
+     - multi_query: each focused keyword query (2-6 terms) runs twice, in
+       parallel: a full-text search sorted by relevance and a title/abstract
+       search sorted by citations (a full-text search sorted by citations
+       mostly returns famous papers that merely mention the terms). A semantic
+       search can be added as one more channel.
+     Result lists are merged with reciprocal rank fusion (RRF).
+  2. Citation expansion (snowballing; on for semantic): foundational papers are
+     often missing from the matches but cited by many of them. Papers cited by
+     several of the top-ranked candidates are fetched in one request.
+  3. Rerank: score each candidate's title + abstract against the request with a
+     cross-encoder or an embedding model, blended with a citation prior.
 
 Rerankers are selected with a spec string (see create_reranker):
   "none"                   keep the RRF order
@@ -44,6 +48,7 @@ BY_RELEVANCE = "relevance_score:desc"
 BY_CITATIONS = "cited_by_count:desc"
 # (sort, searched field) pairs run for every focused query
 RECALL_SEARCHES = ((BY_RELEVANCE, "fulltext"), (BY_CITATIONS, "title_abstract"))
+SEMANTIC_RESULTS = 50  # OpenAlex's maximum for semantic search
 
 
 def title_key(title: Optional[str]) -> str:
@@ -76,24 +81,30 @@ def recall(
     min_citations: Optional[int] = None,
     per_query: int = 25,
     searches: Sequence[Tuple[str, str]] = RECALL_SEARCHES,
+    semantic_query: Optional[str] = None,
     max_workers: int = 6,
 ) -> List[Dict]:
     """
     Run every (query, sort, field) search in parallel and merge the results.
     field is "fulltext" (OpenAlex's default search) or "title_abstract".
+    semantic_query, if given, adds one semantic search (e.g. the user's whole
+    request); its results get the same year and citation filters.
 
     Returns unique raw OpenAlex works ordered by RRF score, each with an added
-    "_rrf" field. Works with the same title (preprint + published version)
-    are merged, keeping the first one seen. Raises RuntimeError if every
-    search failed.
+    "_rrf" field. Raises RuntimeError if every search failed.
     """
     queries = [q.strip() for q in dict.fromkeys(queries) if q and q.strip()]
-    if not queries:
-        return []
     searches = [(q, sort, field) for q in queries for sort, field in searches]
+    if semantic_query and semantic_query.strip():
+        searches.append((semantic_query.strip(), None, "semantic"))
+    if not searches:
+        return []
 
-    def run(search: Tuple[str, str, str]):
+    def run(search: Tuple[str, Optional[str], str]):
         query, sort, field = search
+        if field == "semantic":
+            return client.search_works(query=query, from_year=from_year, to_year=to_year,
+                                       per_page=SEMANTIC_RESULTS, semantic=True)
         if field == "title_abstract":
             kwargs = {"query": "", "filter_string": f"title_and_abstract.search:{_filter_value(query)}"}
         else:
@@ -107,14 +118,35 @@ def recall(
     errors = [r.error for r in responses if r.error]
     if len(errors) == len(responses):
         raise RuntimeError(f"All OpenAlex searches failed: {errors[0]}")
+
+    lists = []
     for (query, sort, field), response in zip(searches, responses):
         if response.error:
             logger.warning(f"Search '{query}' ({sort}, {field}) failed: {response.error}")
+            continue
+        works = [w for w in (response.data or {}).get("results") or [] if w]
+        if field == "semantic" and min_citations:  # Semantic search can't filter by citations
+            works = [w for w in works if (w.get("cited_by_count") or 0) >= min_citations]
+        lists.append(works)
+    return fuse(lists)
 
+
+def fuse(result_lists: Sequence[List[Dict]], base: Optional[List[Dict]] = None) -> List[Dict]:
+    """
+    Merge ranked lists of works with reciprocal rank fusion. Works with the
+    same title (preprint + published version) are merged, keeping the first
+    copy seen. `base` is an already fused list (with "_rrf" scores) to add the
+    new lists to. Returns works ordered by RRF score, each with "_rrf".
+    """
     works: Dict[str, Dict] = {}   # title key -> work
     scores: Dict[str, float] = {}
-    for response in responses:
-        for rank, work in enumerate((response.data or {}).get("results") or [], start=1):
+    for work in base or []:
+        key = title_key(work.get("title"))
+        if key:
+            works.setdefault(key, work)
+            scores[key] = scores.get(key, 0.0) + work.get("_rrf", 0.0)
+    for results in result_lists:
+        for rank, work in enumerate(results, start=1):
             key = title_key((work or {}).get("title"))
             if not key:
                 continue

@@ -107,7 +107,8 @@ class OpenAlexClient:
     """Client for interacting with the OpenAlex API"""
     
     def __init__(self, email: str, api_key: Optional[str] = None,
-                 max_retries: int = 3, rate_limit_delay: float = 1.0, max_retry_wait: float = 30.0):
+                 max_retries: int = 3, rate_limit_delay: float = 1.0, max_retry_wait: float = 30.0,
+                 timeout: tuple = (5, 30)):
         self.base_url = "https://api.openalex.org"
         self.email = email
         self.api_key = api_key  # Optional; avoids the anonymous search rate limit
@@ -116,6 +117,8 @@ class OpenAlexClient:
         # Longest Retry-After worth waiting for. OpenAlex bills requests against a daily
         # budget; when it runs out, Retry-After is the time until the reset (hours).
         self.max_retry_wait = max_retry_wait
+        # (connect, read) seconds; without a timeout a stalled connection hangs a search forever
+        self.timeout = timeout
         
         self.session = requests.Session()
         self.session.headers.update({
@@ -162,7 +165,7 @@ class OpenAlexClient:
                 self.logger.info(f"Making API request: {prepared_request.url}")
                 
                 request_params = {**params, 'api_key': self.api_key} if self.api_key else params
-                response = self.session.request(method, url, params=request_params)
+                response = self.session.request(method, url, params=request_params, timeout=self.timeout)
                 
                 if response.status_code != 200:
                     # Error bodies are not always JSON (e.g. 404 pages); don't let parsing
@@ -244,16 +247,26 @@ class OpenAlexClient:
         per_page: int = 25,
         sort: Optional[str] = None,
         min_citations: Optional[int] = None,
-        filter_string: Optional[str] = None
+        filter_string: Optional[str] = None,
+        semantic: bool = False
     ) -> OpenAlexResponse:
-        """Search for works in OpenAlex."""
+        """
+        Search for works in OpenAlex.
+
+        semantic=True uses OpenAlex's semantic (embedding) search instead of
+        keyword search: it matches meaning rather than words, returns at most
+        50 results, ignores `sort`, and doesn't support the citation filter,
+        so min_citations must be applied by the caller.
+        """
         params = {
             'page': page,
-            'per-page': min(per_page, 200)
+            'per-page': min(per_page, 50 if semantic else 200)
         }
         
         # Add search query if provided
-        if query:
+        if query and semantic:
+            params['search.semantic'] = query[:2000]  # Longer input is truncated by OpenAlex
+        elif query:
             params['search'] = query
         
         # Build filter parts
@@ -267,14 +280,14 @@ class OpenAlexClient:
             year_range = f"{from_year or ''}-{to_year or ''}"
             filter_parts.append(f"publication_year:{year_range}")
         
-        if min_citations is not None:
+        if min_citations is not None and not semantic:
             # OpenAlex reads cited_by_count:N as "exactly N"; we want "at least N"
             filter_parts.append(f"cited_by_count:>{min_citations - 1}")
         
         if filter_parts:
             params['filter'] = ','.join(filter_parts)
             
-        if sort:
+        if sort and not semantic:
             params['sort'] = sort
         
         return self._make_request('works', params)
