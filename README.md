@@ -245,6 +245,7 @@ backend/
 ├── agent.py               # Function-calling research agent
 ├── tools.py               # Search tools: Pydantic schemas + OpenAlex implementations
 ├── mcp_server.py          # MCP server exposing the tools
+├── wsgi.py                # WSGI entry point for gunicorn (used by Docker)
 ├── llm.py                 # LLM client config, Structured Outputs helpers
 ├── query_processor.py     # Query analysis for pipeline search
 ├── literature_searcher.py # Pipeline search and publication details
@@ -257,11 +258,38 @@ eval/                      # Retrieval benchmark: queries, labels, runs, results
 tests/                     # Offline unit tests
 config/nginx.conf          # Example Nginx config for deployment
 .mcp.json                  # Registers the MCP server for Claude Code
+Dockerfile, docker-compose.yml
+```
+
+## Docker
+
+The image bundles the backend, the frontend and the reranker model, with CPU-only PyTorch. Keys are read from `backend/.env` at runtime and are never copied into the image.
+
+```bash
+cp backend/.env.example backend/.env           # then fill in your keys
+docker compose up --build                      # web app at http://localhost:5001
+docker compose --profile mcp up --build        # also the MCP server at http://localhost:8000/mcp
+```
+
+The web app runs under gunicorn (`backend/wsgi.py`). Ports are published on localhost only, because the app has no login and spends your API credits; `LITFINDER_PORT` and `LITFINDER_MCP_PORT` change the host ports.
+
+To use the image as an MCP server over stdio, e.g. in Claude Desktop, have the host run it with `-i`:
+
+```json
+{
+  "mcpServers": {
+    "litfinder": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "--env-file", "/absolute/path/to/backend/.env",
+               "litfinder", "python", "backend/mcp_server.py"]
+    }
+  }
+}
 ```
 
 ## Deployment
 
-In production, Nginx can serve `frontend/` and proxy `/api/` to Flask. `config/nginx.conf` is an example; set its `root` paths to your checkout. The frontend calls the same-origin path `/api`, so it works unchanged behind the proxy.
+Without Docker, Nginx can serve `frontend/` and proxy `/api/` to Flask. `config/nginx.conf` is an example; set its `root` paths to your checkout. The frontend calls the same-origin path `/api`, so it works unchanged behind the proxy.
 
 ## Known Limitations and Roadmap
 

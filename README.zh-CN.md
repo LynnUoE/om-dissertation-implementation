@@ -245,6 +245,7 @@ backend/
 ├── agent.py               # 基于 function calling 的研究 Agent
 ├── tools.py               # 检索工具：Pydantic schema + OpenAlex 实现
 ├── mcp_server.py          # 对外提供工具的 MCP server
+├── wsgi.py                # gunicorn 的 WSGI 入口（Docker 使用）
 ├── llm.py                 # LLM 客户端配置、Structured Outputs 辅助函数
 ├── query_processor.py     # 流水线检索的查询分析
 ├── literature_searcher.py # 流水线检索、论文详情
@@ -257,11 +258,38 @@ eval/                      # 检索评测集：查询、标签、运行结果、
 tests/                     # 离线单元测试
 config/nginx.conf          # 部署用的 Nginx 配置示例
 .mcp.json                  # 为 Claude Code 注册 MCP server
+Dockerfile, docker-compose.yml
+```
+
+## Docker
+
+镜像里包含后端、前端和 reranker 模型，PyTorch 用的是 CPU 版。API key 在运行时从 `backend/.env` 读取，不会被打包进镜像。
+
+```bash
+cp backend/.env.example backend/.env           # 然后填入你的 key
+docker compose up --build                      # Web 应用：http://localhost:5001
+docker compose --profile mcp up --build        # 同时启动 MCP server：http://localhost:8000/mcp
+```
+
+Web 应用由 gunicorn 运行（`backend/wsgi.py`）。端口只对本机开放，因为这个应用没有登录功能，而且会消耗你的 API 额度；可以用 `LITFINDER_PORT` 和 `LITFINDER_MCP_PORT` 修改主机端口。
+
+如果要把镜像当作 stdio 方式的 MCP server 使用（比如在 Claude Desktop 里），让宿主程序加上 `-i` 参数运行它：
+
+```json
+{
+  "mcpServers": {
+    "litfinder": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "--env-file", "/absolute/path/to/backend/.env",
+               "litfinder", "python", "backend/mcp_server.py"]
+    }
+  }
+}
 ```
 
 ## 部署
 
-生产环境中，可以用 Nginx 提供 `frontend/` 静态文件，并把 `/api/` 反向代理到 Flask。`config/nginx.conf` 是一份示例配置，需要把其中的 `root` 路径改成你的项目路径。前端通过同源路径 `/api` 调用接口，所以放在反向代理后面无需修改。
+不用 Docker 的话，可以用 Nginx 提供 `frontend/` 静态文件，并把 `/api/` 反向代理到 Flask。`config/nginx.conf` 是一份示例配置，需要把其中的 `root` 路径改成你的项目路径。前端通过同源路径 `/api` 调用接口，所以放在反向代理后面无需修改。
 
 ## 已知局限和后续计划
 
