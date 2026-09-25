@@ -3,15 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Paper · LitFinder</title>
+    <title>Saved papers · LitFinder</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600&display=swap">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="css/app.css">
     <script src="js/common.js" defer></script>
-    <script src="js/api-service.js" defer></script>
-    <script src="js/publication.js" defer></script>
+    <script src="js/saved.js" defer></script>
 </head>
 <body>
     <header class="site-header">
@@ -19,17 +18,26 @@
             <a class="brand" href="index.html"><span class="brand-mark"><i class="fas fa-book-open"></i></span>LitFinder</a>
             <nav class="site-nav" aria-label="Main">
                 <a href="index.html"><i class="fas fa-magnifying-glass"></i> <span class="label">Search</span></a>
-                <a href="saved.html"><i class="far fa-bookmark"></i> <span class="label">Saved</span><span class="nav-count" id="saved-count"></span></a>
+                <a href="saved.html" class="active"><i class="far fa-bookmark"></i> <span class="label">Saved</span><span class="nav-count" id="saved-count"></span></a>
             </nav>
         </div>
     </header>
 
     <main>
         <div class="container">
-            <a class="back-link" id="back-link" href="index.html"><i class="fas fa-arrow-left"></i> Back</a>
-            <div id="page" aria-live="polite">
-                <div class="skeleton"><div class="bar" style="width:75%;height:20px"></div><div class="bar" style="width:40%"></div><div class="bar" style="width:55%"></div></div>
+            <div class="page-title">
+                <h1>Saved papers</h1>
+                <p>Papers you bookmark are kept in this browser.</p>
             </div>
+            <div class="results-meta">
+                <div class="count" id="saved-summary"></div>
+                <div class="toolbar" id="saved-toolbar" hidden>
+                    <button type="button" class="btn btn-ghost btn-sm" id="copy-all-bibtex"><i class="fas fa-code"></i> Copy all as BibTeX</button>
+                    <button type="button" class="btn btn-ghost btn-sm" id="copy-all-citations"><i class="far fa-copy"></i> Copy all citations</button>
+                    <button type="button" class="btn btn-ghost btn-sm" id="clear-saved"><i class="far fa-trash-can"></i> Clear all</button>
+                </div>
+            </div>
+            <div class="paper-list" id="saved-list"></div>
         </div>
     </main>
 

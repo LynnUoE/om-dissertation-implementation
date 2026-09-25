@@ -50,7 +50,7 @@ cp backend/.env.example backend/.env     # then fill in your keys
 python backend/api_server.py
 ```
 
-Open http://localhost:5001 and tick **Agent mode** on the search form to try agent search. Flask serves the frontend as well as the API, so no other server is needed locally.
+Open http://localhost:5001 and describe what you're looking for; switch the search box from **Search** to **Agent** to try agent search. Flask serves the frontend as well as the API, so no other server is needed locally.
 
 ### Configuration
 
@@ -155,7 +155,7 @@ Example: a real response to *"contrastive learning for molecular representations
 }
 ```
 
-The web UI shows the summary, a "Why this paper" note on each result, and the tool-call trace with token usage.
+The web UI shows the summary, a "Why it's here" note on each result, the recommended researchers, and the tool-call trace with token usage.
 
 ## MCP Server
 

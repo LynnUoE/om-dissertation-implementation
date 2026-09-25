@@ -50,7 +50,7 @@ cp backend/.env.example backend/.env     # 然后填入你的 key
 python backend/api_server.py
 ```
 
-打开 http://localhost:5001 ，在搜索表单中勾选 **Agent mode** 即可体验 Agent 检索。Flask 同时提供前端页面和 API，本地运行不需要其他服务器。
+打开 http://localhost:5001 ，用自然语言描述你要找的内容；把搜索框从 **Search** 切换到 **Agent** 即可体验 Agent 检索。Flask 同时提供前端页面和 API，本地运行不需要其他服务器。
 
 ### 配置
 
@@ -155,7 +155,7 @@ python backend/api_server.py
 }
 ```
 
-Web 界面会显示 Agent 的总结、每条结果的"Why this paper"说明，以及工具调用记录和 token 用量。
+Web 界面会显示 Agent 的总结、每条结果的"Why it's here"推荐理由、推荐的研究者，以及工具调用记录和 token 用量。
 
 ## MCP Server
 
