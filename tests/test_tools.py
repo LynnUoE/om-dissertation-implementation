@@ -135,3 +135,22 @@ def test_short_rate_limit_is_retried(monkeypatch):
 
     response = client.search_works("x")
     assert response.error is None and slept[0] == 2.0
+
+
+def test_requests_time_out_and_are_retried(monkeypatch):
+    import requests
+    client = OpenAlexClient("test@example.com")
+    client.logger.disabled = True
+    seen = []
+
+    def request(*args, **kwargs):
+        seen.append(kwargs.get("timeout"))
+        if len(seen) == 1:
+            raise requests.exceptions.ReadTimeout("stalled")
+        return FakeHTTPResponse(200, body={"results": []})
+    client.session.request = request
+    monkeypatch.setattr("openalex_client.time.sleep", lambda s: None)
+
+    response = client.search_works("x")
+    assert response.error is None
+    assert seen == [(5, 30), (5, 30)]  # every request has a timeout; the stalled one was retried

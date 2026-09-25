@@ -303,3 +303,110 @@ def test_search_papers_only_grounds_papers_it_returned():
     result = ex.execute("search_papers", search_args(limit=2))
     assert [p["paper_id"] for p in result["papers"]] == ["W5", "W4"]
     assert set(ex.seen_papers) == {"W5", "W4"}  # the other three were never shown to the model
+
+
+# -- semantic recall -----------------------------------------------------------
+
+def test_client_semantic_search_params():
+    from openalex_client import OpenAlexClient
+    client = OpenAlexClient("test@example.com")
+    captured = {}
+    client._make_request = lambda endpoint, params=None, method="GET": captured.update(params) or None
+    client.search_works("a long request " * 200, from_year=2020, min_citations=5, sort=CIT,
+                        per_page=100, semantic=True)
+    assert len(captured["search.semantic"]) == 2000 and "search" not in captured
+    assert captured["per-page"] == 50 and "sort" not in captured
+    assert captured["filter"] == "publication_year:2020-"  # no citation filter: unsupported
+
+
+def test_recall_adds_semantic_channel_and_filters_citations():
+    low, high = make_work(1, "Low"), make_work(2, "High")
+    low["cited_by_count"], high["cited_by_count"] = 3, 50
+    client = ListsOpenAlex({("q1", REL): [make_work(3, "Keyword")]})
+    original = client.search_works
+
+    def search_works(query="", semantic=False, **kwargs):
+        if semantic:
+            client.calls.append({"query": query, "semantic": True, **kwargs})
+            return OpenAlexResponse(200, {"results": [low, high]})
+        return original(query, **kwargs)
+    client.search_works = search_works
+
+    works = recall(client, ["q1"], min_citations=10, from_year=2021, semantic_query="the whole request")
+    semantic_call = [c for c in client.calls if c.get("semantic")][0]
+    assert semantic_call["query"] == "the whole request" and semantic_call["from_year"] == 2021
+    assert {w["title"] for w in works} == {"Keyword", "High"}  # "Low" is under min_citations
+
+
+def test_fuse_adds_lists_to_an_existing_pool():
+    a, b = make_work(1, "Alpha"), make_work(2, "Beta")
+    base = retrieval.fuse([[a, b]])
+    fused = retrieval.fuse([[make_work(9, "BETA"), make_work(3, "Gamma")]], base=base)
+    assert [w["title"] for w in fused] == ["Beta", "Alpha", "Gamma"]
+    assert fused[0]["_rrf"] == pytest.approx(1 / 62 + 1 / 61)
+
+
+def test_searcher_sends_the_request_to_semantic_search_when_enabled():
+    openalex = FakeOpenAlex()
+    semantic_queries = []
+    original = openalex.search_works
+
+    def search_works(query="", semantic=False, **kwargs):
+        if semantic:
+            semantic_queries.append(query)
+        return original(query, **kwargs)
+    openalex.search_works = search_works
+
+    make_searcher(openalex).search("GNNs for molecules")
+    assert semantic_queries == []
+    searcher = make_searcher(openalex)
+    searcher.semantic_recall = True
+    searcher.search("GNNs for molecules")
+    assert semantic_queries == ["GNNs for molecules"]
+
+
+# -- semantic strategy ---------------------------------------------------------
+
+def test_semantic_strategy_searches_by_meaning_then_expands():
+    top = [cites(make_work(i, f"Recent {i}"), 90) for i in (1, 2)]
+    classic = make_work(90, "Classic")
+    calls = []
+
+    class SemanticOpenAlex:
+        def search_works(self, query="", semantic=False, **kwargs):
+            calls.append({"query": query, "semantic": semantic, **kwargs})
+            if semantic:
+                return OpenAlexResponse(200, {"results": top})
+            if "ids.openalex" in (kwargs.get("filter_string") or ""):
+                return OpenAlexResponse(200, {"results": [classic]})
+            return OpenAlexResponse(200, {"results": [make_work(50, "Keyword hit")]})
+
+    reranker = ScoreByTitle({"Recent 1": 0.9, "Recent 2": 0.8, "Classic": 0.7})
+    searcher = make_searcher(SemanticOpenAlex(), strategy="semantic", reranker=reranker)
+    searcher.citation_expansion = True
+    result = searcher.search("diffusion models for image generation", max_results=5)
+
+    assert [c["semantic"] for c in calls] == [True, False]  # one semantic search, one expansion request
+    assert calls[0]["query"] == "diffusion models for image generation"
+    assert {r["title"] for r in result["results"]} == {"Recent 1", "Recent 2", "Classic"}
+    assert result["metadata"]["recall"] == {"strategy": "semantic", "queries": [],
+                                            "semantic_query": "diffusion models for image generation",
+                                            "citation_expansion": True}
+
+
+def test_multi_query_reports_its_keyword_queries():
+    result = make_searcher(FakeOpenAlex(), strategy="multi_query").search("q")
+    plan = result["metadata"]["recall"]
+    assert plan["strategy"] == "multi_query" and plan["queries"] == STRUCTURED["search_queries"]
+    assert plan["semantic_query"] is None and plan["citation_expansion"] is False
+
+
+def test_factory_uses_strategy_defaults(monkeypatch):
+    from literature_searcher import STRATEGY_DEFAULTS, create_literature_searcher
+    monkeypatch.setattr("literature_searcher.create_reranker", lambda spec, llm_client=None: None)
+    semantic = create_literature_searcher("k", "e@example.com")
+    assert semantic.retrieval_strategy == "semantic"
+    assert semantic.citation_weight == STRATEGY_DEFAULTS["semantic"]["citation_weight"] == 0.2
+    assert semantic.citation_expansion is True
+    keyword = create_literature_searcher("k", "e@example.com", retrieval_strategy="multi_query", citation_weight=0.3)
+    assert keyword.citation_weight == 0.3 and keyword.citation_expansion is False

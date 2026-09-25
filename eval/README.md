@@ -49,7 +49,7 @@ python eval/run_eval.py --judge-model gpt-4.1-mini    # label new papers with it
 ## Fair comparisons
 
 - All pipeline systems share one cached LLM query analysis per query, so they differ only in retrieval.
-- `multi_query` systems with the same recall version (`_v1` or not) rerank the same cached candidate pool, so they differ only in the reranker and the citation prior.
+- Systems with the same recall version rerank the same cached candidate pool, so they differ only in the reranker, the citation prior and expansion. The semantic search results are cached once per query; `multi_query+semantic` pools fuse them with the keyword pool exactly as `recall()` does.
 - Reported latency covers the whole search (LLM analysis + OpenAlex + reranking), with reranker models loaded beforehand.
 
 ## Limitations

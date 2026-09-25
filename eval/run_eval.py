@@ -67,6 +67,22 @@ SYSTEMS: Dict[str, Dict] = {
                                    "about": "Recall v2 + MiniLM, 20% citation prior"},
     "multi_query+minilm+cite0.3": {"kind": "pipeline", "reranker": MINILM, "citation_weight": 0.3,
                                    "about": "Recall v2 + MiniLM, 30% citation prior"},
+    # Recall v2 plus OpenAlex semantic search on the whole request
+    "multi_query+semantic+minilm+cite0.1": {"kind": "pipeline", "recall": "v2+semantic", "reranker": MINILM,
+                                            "citation_weight": 0.1,
+                                            "about": "Recall v2 + semantic search, MiniLM, 10% citation prior"},
+    "multi_query+semantic+minilm": {"kind": "pipeline", "recall": "v2+semantic", "reranker": MINILM,
+                                    "about": "Recall v2 + semantic search, MiniLM"},
+    "semantic": {"kind": "pipeline", "recall": "semantic", "reranker": "none",
+                 "about": "OpenAlex semantic search alone, in its own order (top 50)"},
+    "semantic+minilm+cite0.1": {"kind": "pipeline", "recall": "semantic", "reranker": MINILM, "citation_weight": 0.1,
+                                "about": "Semantic search alone, reranked with MiniLM + 10% citation prior"},
+    "semantic+minilm+cite0.1+expand": {"kind": "pipeline", "recall": "semantic", "reranker": MINILM,
+                                       "citation_weight": 0.1, "expand": True,
+                                       "about": "Semantic search + citation expansion, MiniLM, 10% citation prior"},
+    "semantic+minilm+cite0.2+expand": {"kind": "pipeline", "recall": "semantic", "reranker": MINILM,
+                                       "citation_weight": 0.2, "expand": True,
+                                       "about": "Semantic search + citation expansion, MiniLM, 20% citation prior"},
     "agent": {"kind": "agent", "about": "Function-calling agent (returns up to ~10 papers)"},
     "agent+rerank": {"kind": "agent", "reranker": MINILM,
                      "about": "Agent whose search_papers tool reranks with the MiniLM cross-encoder"},
@@ -152,7 +168,33 @@ class Runner:
             return {"structured": structured, "seconds": time.time() - start}
         return self._cached("analysis", q["id"], compute)
 
+    def semantic(self, q: Dict, structured: Dict) -> Dict:
+        """OpenAlex semantic search for the whole request (cached)."""
+        def compute():
+            start = time.time()
+            from_year, to_year = self.searcher.resolve_year_range(structured)
+            response = self.searcher.openalex_client.search_works(
+                query=q["query"], from_year=from_year, to_year=to_year, per_page=50, semantic=True)
+            self._check_openalex(q["id"])
+            return {"works": [{f: w.get(f) for f in WORK_FIELDS} for w in response.data.get("results", [])],
+                    "seconds": time.time() - start}
+        return self._cached("semantic", q["id"], compute)
+
     def candidates(self, q: Dict, structured: Dict, version: str) -> Dict:
+        """
+        Candidate pool for a recall version: "v1", "v2", "semantic" (semantic
+        search alone) or "v2+semantic". Combined pools are fused from the cached
+        parts, exactly as recall() fuses its result lists; their searches run
+        in parallel, so recall time is the slower of the two.
+        """
+        from retrieval import fuse
+        if version in ("semantic", "v2+semantic"):
+            sem = self.semantic(q, structured)
+            if version == "semantic":
+                return {"works": fuse([sem["works"]]), "seconds": sem["seconds"]}
+            v2 = self.candidates(q, structured, "v2")
+            return {"works": fuse([sem["works"]], base=v2["works"]), "seconds": max(sem["seconds"], v2["seconds"])}
+
         def compute():
             from retrieval import RECALL_SEARCHES
             self.searcher.recall_searches = RECALL_V1 if version == "v1" else RECALL_SEARCHES

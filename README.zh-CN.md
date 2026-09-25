@@ -6,8 +6,8 @@ LitFinder 是一个基于大语言模型的学术文献检索系统。用自然�
 
 这个项目最初是我在爱丁堡大学（School of Informatics）的本科毕业设计，之后加入了 LLM 工具调用相关的能力：
 
-- **流水线检索**：LLM 用 **Structured Outputs**（Pydantic schema 约束输出）把查询转换成几个聚焦的检索式。检索分两个阶段：先用多次 OpenAlex 检索召回候选论文，再用 **cross-encoder reranker** 按与需求的相关度重新排序。
-- **评测**：一个包含 32 个查询、带分级相关度标签的评测集，用来衡量每一种检索方案。和原始设计相比，重排后的流水线把 nDCG@10 从 0.55 提高到 0.89-0.92（[结果](#检索与评测)）。
+- **流水线检索**：OpenAlex **语义搜索**按意思找论文，**引文扩展**补上它们引用的奠基性论文，再用 **cross-encoder reranker** 按与需求的相关度排序。LLM 会先用 **Structured Outputs**（Pydantic schema 约束输出）阅读需求，识别日期范围等限制条件。
+- **评测**：一个包含 32 个查询、带分级相关度标签的评测集，用来衡量每一种检索方案。和原始设计相比，现在的方案把 nDCG@10 从 0.55 提高到 0.95，每次检索的 OpenAlex 请求也从 10 次降到 2 次（[结果](#检索与评测)）。
 - **Agent 检索**：LLM 通过 **function calling** 自己规划检索过程。它从 4 个工具中选择调用，并行执行多个聚焦的检索，阅读摘要，最后返回排好序、经过 grounding 校验的答案，每篇论文都附有推荐理由。
 - **MCP server**：同一套工具通过 **Model Context Protocol** 对外提供，Claude Code、Claude Desktop 或任何 MCP 宿主程序都可以直接用来检索文献。
 - **不绑定服务商**：通过 `LLM_BASE_URL` / `LLM_MODEL` 可以使用 OpenAI，或任何兼容 OpenAI 接口的服务（例如火山方舟）。
@@ -18,7 +18,7 @@ LitFinder 是一个基于大语言模型的学术文献检索系统。用自然�
 flowchart LR
     subgraph Backend [Flask 后端]
         Pipeline["查询处理器<br/>(Structured Outputs)"]
-        Searcher["两阶段检索<br/>召回 → cross-encoder 重排"]
+        Searcher["检索<br/>语义搜索 → 引文扩展<br/>→ cross-encoder 重排"]
         Agent["研究 Agent<br/>(function calling 循环)"]
         MCP[mcp_server.py]
         Tools["tools.py<br/>search_papers, get_paper<br/>search_authors, get_author_papers"]
@@ -63,10 +63,11 @@ python backend/api_server.py
 | `LLM_BASE_URL` | OpenAI | 兼容 OpenAI 接口的服务商地址，例如 `https://ark.cn-beijing.volces.com/api/v3` |
 | `LLM_API_KEY` | `OPENAI_API_KEY` | `LLM_BASE_URL` 对应服务商的 key |
 | `AGENT_MAX_STEPS` | `6` | 每次 Agent 检索最多调用 LLM 的次数 |
-| `RETRIEVAL_STRATEGY` | `multi_query` | `multi_query`（两阶段检索）或 `single_query`（原始流水线，保留作为基线） |
+| `RETRIEVAL_STRATEGY` | `semantic` | `semantic`（语义搜索 + 引文扩展）、`multi_query`（聚焦的关键词检索）或 `single_query`（原始流水线，保留作为基线） |
 | `RERANKER` | `cross-encoder` | `none`、`embedding[:模型]` 或 `cross-encoder[:Hugging Face 模型]`；默认模型是 `cross-encoder/ms-marco-MiniLM-L-6-v2` |
-| `RERANK_CITATION_WEIGHT` | `0.1` | 最终得分中引用数先验的权重 |
-| `CITATION_EXPANSION` | `false` | 把排名靠前的结果共同引用的论文也加入重排（多一次 OpenAlex 请求） |
+| `RERANK_CITATION_WEIGHT` | 按策略 | 最终得分中引用数先验的权重（`semantic` 为 0.2，`multi_query` 为 0.1） |
+| `CITATION_EXPANSION` | 按策略 | 把排名靠前的结果共同引用的论文也加入重排（`semantic` 默认开启） |
+| `SEMANTIC_RECALL` | `false` | 仅用于 `multi_query`：额外对完整需求做一次语义检索 |
 | `AGENT_RERANK` | `false` | 用 `RERANKER` 重排 Agent 的 `search_papers` 结果 |
 | `OPENALEX_API_KEY` | 无 | OpenAlex API key（建议设置） |
 | `RESEARCHER_EMAIL` | `research@example.com` | 发给 OpenAlex 的联系邮箱 |
@@ -74,12 +75,17 @@ python backend/api_server.py
 
 ## 检索与评测
 
-### 两阶段检索
+### 流水线检索如何找到论文
 
-原来的流水线把 LLM 抽取出的所有词拼成一个很长的查询，经常超过 50 个词。OpenAlex 检索几乎要求每个词都匹配上，所以这种查询返回的结果很少，有时一篇都没有：比如"speculative decoding for LLM inference"就检索不到任何论文。现在的流水线检索分两个阶段（`backend/retrieval.py`）：
+原来的流水线把 LLM 抽取出的所有词拼成一个很长的查询，经常超过 50 个词。OpenAlex 的关键词检索几乎要求每个词都匹配上，所以这种查询返回的结果很少，有时一篇都没有：比如"speculative decoding for LLM inference"就检索不到任何论文。现在的默认流程如下（`RETRIEVAL_STRATEGY=semantic`，代码在 `backend/retrieval.py`）：
 
-1. **召回。** LLM 写出 3-5 个 2-6 个词的聚焦检索式。每个检索式在 OpenAlex 上并行检索两次：一次是按相关度排序的全文检索，一次是按引用数排序、只匹配标题和摘要的检索。结果用 reciprocal rank fusion 合并，得到大约 100-200 篇候选论文。
-2. **重排。** 用 cross-encoder（`ms-marco-MiniLM-L-6-v2`，2200 万参数，本地运行）把每篇候选论文的标题和摘要与用户的原始需求放在一起打分。最终得分由 90% 的相关度分数和 10% 的对数引用数先验组成。
+1. **语义搜索。** 用户的完整需求交给 OpenAlex 的语义搜索。它在整个 OpenAlex 中按意思匹配标题和摘要，用词不同的论文也能找到。每次最多返回 50 篇，大多是和话题高度吻合的较新论文。
+2. **引文扩展。** 奠基性论文很少出现在这些结果里，但这些结果会引用它们。把被多篇高分结果共同引用的论文用一次很便宜的请求取回来，也就是研究者平时手动做的"顺藤摸瓜"。
+3. **重排。** 用 cross-encoder（`ms-marco-MiniLM-L-6-v2`，2200 万参数，本地运行）把每篇候选论文的标题和摘要与需求放在一起打分。最终得分由 80% 的相关度分数和 20% 的对数引用数先验组成。
+
+LLM 仍然会先阅读需求，识别"since 2023"之类的限制条件。每次检索只需 2 次 OpenAlex 请求，约 0.0011 美元，每天的免费额度大约可以支持 900 次检索。
+
+之前的关键词方案仍然可以用 `RETRIEVAL_STRATEGY=multi_query` 启用：LLM 写出 3-5 个聚焦检索式，每个检索式分别做一次按相关度排序的全文检索和一次按引用数排序的标题/摘要检索，合并得到约 180 篇候选论文后用同样的方式重排。每次检索需要 10 次请求。
 
 ### 评测
 
@@ -87,25 +93,30 @@ python backend/api_server.py
 
 - **查询**：32 个研究需求，覆盖机器学习、生物、医学、材料、气候和社会科学。
 - **代表作**：手工挑选的 159 篇奠基性论文，每个查询 4-5 篇。
-- **相关度标签**：由 `gpt-4.1` 打出的 2,867 条分级标签，覆盖所有系统返回的前 20 篇论文。
+- **相关度标签**：由 `gpt-4.1` 打出的 3,792 条分级标签，覆盖所有系统返回的前 20 篇论文。
 
 部分系统的结果（完整表格见 [eval/results.md](eval/results.md)）：
 
-| 系统 | nDCG@10 | Recall@20 | 代表作 R@20 | 延迟中位数 |
-|---|---|---|---|---|
-| 原始流水线（一个长查询） | 0.550 | 0.149 | 0.006 | 4.5 s |
-| 聚焦检索式，不重排 | 0.731 | 0.229 | 0.370 | 5.5 s |
-| + MiniLM 重排 | 0.924 | 0.364 | 0.234 | 6.1 s |
-| **+ MiniLM + 10% 引用先验（默认）** | **0.893** | **0.343** | **0.391** | **6.1 s** |
-| + bge-reranker-v2-m3（5.68 亿参数） | 0.942 | 0.363 | 0.248 | 18.0 s |
-| Agent 检索（gpt-4o） | 0.625 | 0.104 | 0.250 | 15.0 s |
+| 系统 | nDCG@10 | Recall@20 | 代表作 R@20 | 延迟中位数 | OpenAlex 请求数 |
+|---|---|---|---|---|---|
+| 原始流水线（一个长查询） | 0.550 | 0.098 | 0.006 | 4.5 s | 1 |
+| 关键词检索式，不重排 | 0.731 | 0.147 | 0.370 | 5.5 s | 10 |
+| 关键词检索式 + MiniLM | 0.924 | 0.232 | 0.234 | 6.1 s | 10 |
+| 关键词检索式 + MiniLM + 10% 引用先验（`multi_query`） | 0.893 | 0.218 | 0.391 | 6.1 s | 10 |
+| … + 一路语义检索（`SEMANTIC_RECALL=true`） | 0.898 | 0.225 | 0.397 | 6.4 s | 11 |
+| 只用语义搜索，按 OpenAlex 的顺序 | 0.950 | 0.251 | 0.106 | 3.9 s | 1 |
+| 语义搜索 + MiniLM + 10% 引用先验 | 0.969 | 0.253 | 0.106 | 4.1 s | 1 |
+| **语义搜索 + 引文扩展 + MiniLM + 20% 引用先验（默认）** | **0.947** | **0.251** | **0.341** | **4.9 s** | **2** |
+| Agent 检索（gpt-4o） | 0.625 | 0.065 | 0.250 | 15.0 s | 约 2-3 |
 
 从数据中可以看出：
 
-- **提升主要来自重排。** 只用聚焦检索式也有帮助，但重排把 nDCG@10 从 0.55 提高到 0.92（p < 0.001，配对随机化检验）。
+- **重排挽救了关键词流水线。** 只用聚焦的关键词检索式也有帮助，但重排把 nDCG@10 从 0.55 提高到 0.92（p < 0.001，配对随机化检验）。
+- **语义搜索找话题相关论文的能力超过任何关键词方案。** 单独使用、保持 OpenAlex 返回的顺序，nDCG@10 就有 0.95，而且只需 1 次请求，关键词方案要 10 次。
+- **话题相关性和奠基性论文之间存在取舍。** 语义搜索只返回了 159 篇代表作中的 19 篇；方案越贴近话题，DDPM 这样的里程碑论文就越容易被措辞更贴近需求的新论文挤出去。引文扩展加上 20% 的引用先验，把代表作召回率从 0.11 拉回到 0.34。
+- **默认方案是最好的平衡。** 和加了语义检索的关键词流水线相比，它的 nDCG@10 更高（0.947 对 0.898，p = 0.02），Recall@20 也更高（p < 0.001），代表作召回率相近（0.34 对 0.40，p = 0.36），快 1.5 秒，OpenAlex 费用只有十分之一。
 - **小模型就够用。** MiniLM（2200 万参数）和 bge-reranker-v2-m3（5.68 亿参数）的得分没有显著差异（p = 0.27），延迟却只有后者的三分之一。OpenAI embedding 的得分也差不多，但每次检索要多调用一次 API。
-- **话题相关性和奠基性论文之间存在取舍。** 方案越擅长匹配话题，DDPM 这样的里程碑论文就越容易被标题更贴近查询的新论文挤出去。加入 10% 的引用先验后，代表作召回率从 0.23 提高到 0.39（p = 0.001），nDCG@10 从 0.92 变为 0.89，差异不显著（p = 0.14）。
-- **有些想法没有效果，所以默认关闭。** 引文扩展（从排名靠前结果的参考文献中补充论文）没有带来可测量的提升。对 Agent 的工具结果做重排，能提高 Agent 的 nDCG（0.63 → 0.71，p = 0.03），但它的代表作召回率会从 0.25 降到 0.15。
+- **不是每个想法都有效。** 引文扩展对关键词流水线没有作用，因为它的候选论文里本来就有经典论文。对 Agent 的工具结果做重排能提高它的 nDCG（0.63 → 0.71，p = 0.03），但它的代表作召回率会从 0.25 降到 0.15，所以默认关闭。
 - **Agent 在这些指标上得分较低，这是由它的设计决定的。** 它大约调用 2 次工具，推荐 5-6 篇论文，而这些指标奖励的是完整的前 10 / 前 20 篇结果。Agent 的优势在于推荐理由、推荐研究者、处理多部分问题，这些指标衡量不到。
 
 运行 `python eval/run_eval.py` 可以重跑评测。
@@ -228,9 +239,9 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-61 个测试离线运行，不到 1 秒完成，用假的 LLM、OpenAlex 和 reranker 客户端替代真实服务。覆盖范围：
+70 个测试离线运行，不到 1 秒完成，用假的 LLM、OpenAlex 和 reranker 客户端替代真实服务。覆盖范围：
 
-- 两阶段检索：检索式融合、重复论文合并、过滤条件、重排、引用先验、引文扩展、OpenAlex 额度用尽的报错
+- 检索：语义搜索、关键词检索式融合、重复论文合并、过滤条件、重排、引用先验、引文扩展、各策略的默认配置、OpenAlex 额度用尽和请求超时
 - 评测指标
 - 工具 schema 和参数校验
 - Agent 循环：`tool_call_id` 对应关系、并行调用、编造的 ID、强制最后一步作答、API 出错
@@ -249,7 +260,7 @@ backend/
 ├── llm.py                 # LLM 客户端配置、Structured Outputs 辅助函数
 ├── query_processor.py     # 流水线检索的查询分析
 ├── literature_searcher.py # 流水线检索、论文详情
-├── retrieval.py           # 两阶段检索：召回、reranker、引文扩展
+├── retrieval.py           # 检索：语义召回和关键词召回、reranker、引文扩展
 ├── research_analyzer.py   # 用 LLM 分析论文
 ├── openalex_client.py     # OpenAlex API 客户端
 └── .env.example           # 配置模板
@@ -271,7 +282,7 @@ docker compose up --build                      # Web 应用：http://localhost:5
 docker compose --profile mcp up --build        # 同时启动 MCP server：http://localhost:8000/mcp
 ```
 
-Web 应用由 gunicorn 运行（`backend/wsgi.py`）。端口只对本机开放，因为这个应用没有登录功能，而且会消耗你的 API 额度；可以用 `LITFINDER_PORT` 和 `LITFINDER_MCP_PORT` 修改主机端口。
+Web 应用由 gunicorn 运行（`backend/wsgi.py`）。镜像设置了 `HF_HUB_OFFLINE=1`，启动时不会连接 Hugging Face；如果把 `RERANKER` 换成镜像里没有的模型，需要把它设为 `0`。端口只对本机开放，因为这个应用没有登录功能，而且会消耗你的 API 额度；可以用 `LITFINDER_PORT` 和 `LITFINDER_MCP_PORT` 修改主机端口。
 
 如果要把镜像当作 stdio 方式的 MCP server 使用（比如在 Claude Desktop 里），让宿主程序加上 `-i` 参数运行它：
 
@@ -293,9 +304,9 @@ Web 应用由 gunicorn 运行（`backend/wsgi.py`）。端口只对本机开放�
 
 ## 已知局限和后续计划
 
-- **召回仍然受限于 OpenAlex 的关键词检索。** 大约 40% 的代表作根本进不了候选池，这部分任何 reranker 都找不回来。下一步：加一路基于论文 embedding 的稠密检索（例如 SPECTER2）作为第二个召回通道。
+- **奠基性论文仍是短板。** 默认方案在前 20 篇里大约能找到三分之一的代表作。语义搜索最多只返回 50 篇，而且 OpenAlex 里摘要登记错误的论文无法被正确排序。下一步：用自建索引扩大候选池，并让 Agent 顺着引用关系追踪论文。
 - **评测标签来自 LLM。** 抽查结果看起来合理，159 篇代表作中有 147 篇被判为高度相关，但单条标签仍可能出错，而且 32 个查询的规模偏小。
-- **OpenAlex 每次检索都要计费。** 一次流水线检索大约发 10 个请求，有 API key 时每天的免费额度约 1,000 次检索。OpenAlex 的数据本身也有错误：LoRA 论文的标题登记错了，DDPM 的摘要是另一篇论文的。
+- **OpenAlex 每次检索都要计费。** 一次流水线检索发 2 个请求（`multi_query` 为 10 个），有 API key 时每天的免费额度约可支持 900 次检索。语义搜索还限制每秒 1 次请求。OpenAlex 的数据本身也有错误：LoRA 论文的标题登记错了，DDPM 的摘要是另一篇论文的。
 - **Agent 的推荐理由是自由文本。** 论文 ID 经过 grounding 校验，但推荐理由中仍可能有小错误。
 - **非 OpenAI 服务商。** 降级到 JSON mode 的逻辑有单元测试覆盖，但还没有在非 OpenAI 的服务商上实际运行过。
 

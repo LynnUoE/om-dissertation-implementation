@@ -27,16 +27,20 @@ class Config:
     LLM_BASE_URL = os.getenv("LLM_BASE_URL") or None
     LLM_MODEL = os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
     AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))  # Max LLM calls per agent search
-    # Pipeline search: multi_query (focused searches + rerank) or single_query (original baseline)
-    RETRIEVAL_STRATEGY = os.getenv("RETRIEVAL_STRATEGY", "multi_query")
+    # Pipeline search: semantic (semantic search + citation expansion + rerank), multi_query
+    # (focused keyword searches + rerank) or single_query (original baseline); see eval/results.md
+    RETRIEVAL_STRATEGY = os.getenv("RETRIEVAL_STRATEGY", "semantic")
     # none | embedding[:model] | cross-encoder[:model]; see retrieval.create_reranker
     RERANKER = os.getenv("RERANKER", "cross-encoder")
-    # Weight of a citation-count prior in the final score. 0.1 keeps foundational papers in the
-    # results at little cost to topical relevance (see eval/results.md)
-    RERANK_CITATION_WEIGHT = float(os.getenv("RERANK_CITATION_WEIGHT", "0.1"))
-    # Add papers co-cited by the top candidates (one extra OpenAlex request per search; made no
-    # measurable difference in eval/, so off by default)
-    CITATION_EXPANSION = os.getenv("CITATION_EXPANSION", "false").lower() == "true"
+    # Weight of a citation-count prior in the final score, which keeps foundational papers in
+    # the results. Unset: the strategy's default (semantic 0.2, multi_query 0.1)
+    RERANK_CITATION_WEIGHT = float(os.environ["RERANK_CITATION_WEIGHT"]) if os.getenv("RERANK_CITATION_WEIGHT") else None
+    # Add papers co-cited by the top candidates (one cheap OpenAlex request per search).
+    # Unset: the strategy's default (on for semantic, where it recovers foundational papers)
+    CITATION_EXPANSION = (os.environ["CITATION_EXPANSION"].lower() == "true"
+                          if os.getenv("CITATION_EXPANSION") else None)
+    # multi_query only: also run a semantic search on the whole request
+    SEMANTIC_RECALL = os.getenv("SEMANTIC_RECALL", "false").lower() == "true"
     # Rerank the agent's search_papers results with RERANKER (raises nDCG, but the agent then
     # recommends fewer foundational papers; see eval/results.md)
     AGENT_RERANK = os.getenv("AGENT_RERANK", "false").lower() == "true"
@@ -88,7 +92,8 @@ def get_literature_searcher() -> LiteratureSearcher:
             retrieval_strategy=Config.RETRIEVAL_STRATEGY,
             reranker=Config.RERANKER,
             citation_weight=Config.RERANK_CITATION_WEIGHT,
-            citation_expansion=Config.CITATION_EXPANSION
+            citation_expansion=Config.CITATION_EXPANSION,
+            semantic_recall=Config.SEMANTIC_RECALL
         )
     return literature_searcher
 

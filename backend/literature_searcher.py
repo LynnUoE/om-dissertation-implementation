@@ -34,7 +34,13 @@ class LiteratureSearchResult:
         """Convert to dictionary for API responses"""
         return asdict(self)
 
-RETRIEVAL_STRATEGIES = ('multi_query', 'single_query')
+RETRIEVAL_STRATEGIES = ('semantic', 'multi_query', 'single_query')
+# Per-strategy defaults chosen on eval/ (see eval/results.md)
+STRATEGY_DEFAULTS = {
+    'semantic': {'citation_weight': 0.2, 'citation_expansion': True},
+    'multi_query': {'citation_weight': 0.1, 'citation_expansion': False},
+    'single_query': {'citation_weight': 0.0, 'citation_expansion': False},
+}
 MAX_SEARCH_QUERIES = 5
 
 class LiteratureSearcher:
@@ -51,11 +57,12 @@ class LiteratureSearcher:
         cache_duration: int = 24,  # Cache duration in hours
         llm_model: str = DEFAULT_LLM_MODEL,
         llm_base_url: Optional[str] = None,
-        retrieval_strategy: str = 'multi_query',
+        retrieval_strategy: str = 'semantic',
         reranker: Optional[Reranker] = None,
         citation_weight: float = 0.0,
         recall_per_query: int = 25,
-        citation_expansion: bool = False
+        citation_expansion: bool = False,
+        semantic_recall: bool = False
     ):
         """
         Initialize the literature searcher
@@ -67,15 +74,18 @@ class LiteratureSearcher:
             cache_duration: Duration in hours to cache results
             llm_model: Chat model name (or provider endpoint ID)
             llm_base_url: Optional OpenAI-compatible API base URL
-            retrieval_strategy: 'multi_query' (several focused OpenAlex searches, then rerank)
-                or 'single_query' (the original pipeline: one long keyword query and
-                term-overlap scoring)
+            retrieval_strategy: 'semantic' (OpenAlex semantic search on the whole request,
+                usually with citation expansion, then rerank), 'multi_query' (several
+                focused keyword searches, then rerank) or 'single_query' (the original
+                pipeline: one long keyword query and term-overlap scoring)
             reranker: Scores multi_query candidates against the request; None keeps
                 the reciprocal rank fusion order
             citation_weight: Weight of the citation prior in the final multi_query score (0-1)
             recall_per_query: Results fetched per focused query and sort order
             citation_expansion: Also consider papers cited by several of the top
                 multi_query candidates (needs a reranker; one extra OpenAlex request)
+            semantic_recall: Also send the whole request to OpenAlex semantic search
+                during multi_query recall (one extra OpenAlex request); 'semantic' always does
         """
         if retrieval_strategy not in RETRIEVAL_STRATEGIES:
             raise ValueError(f"retrieval_strategy must be one of {RETRIEVAL_STRATEGIES}")
@@ -90,6 +100,7 @@ class LiteratureSearcher:
         self.recall_per_query = recall_per_query
         self.recall_searches = RECALL_SEARCHES
         self.citation_expansion = citation_expansion
+        self.semantic_recall = semantic_recall
         
         # Setup result cache
         self.result_cache = {}
@@ -192,6 +203,8 @@ class LiteratureSearcher:
                 }
             
             from_year, to_year = self.resolve_year_range(structured_query, from_year, to_year)
+            recall_plan = (None if self.retrieval_strategy == 'single_query'
+                           else self.recall_plan(structured_query, query))
             
             search_start_time = datetime.now()
             try:
@@ -200,7 +213,8 @@ class LiteratureSearcher:
                         structured_query, max_results, from_year, to_year, min_citations,
                         publication_types, open_access_only)
                 else:
-                    candidates = self.retrieve_candidates(structured_query, from_year, to_year, min_citations)
+                    candidates = self.retrieve_candidates(structured_query, from_year, to_year, min_citations,
+                                                          query=query)
                     candidate_count = len(candidates)
                     limited_results = self.rank_candidates(
                         query, candidates, structured_query, max_results, publication_types, open_access_only,
@@ -237,6 +251,7 @@ class LiteratureSearcher:
                     'returned_results': len(limited_results),
                     'from_year': from_year,
                     'to_year': to_year,
+                    'recall': recall_plan,
                     'processing_time': total_processing_time
                 }
             }
@@ -275,18 +290,36 @@ class LiteratureSearcher:
         structured_query: Dict,
         from_year: Optional[int] = None,
         to_year: Optional[int] = None,
-        min_citations: Optional[int] = None
+        min_citations: Optional[int] = None,
+        query: Optional[str] = None
     ) -> List[Dict]:
         """
-        Stage 1 of multi_query retrieval: run the focused search queries against
+        Stage 1 of retrieval: run the searches described by recall_plan() against
         OpenAlex and return unique raw works in fused rank order. Raises
         RuntimeError if OpenAlex fails.
         """
-        queries = self._search_queries(structured_query)
-        self.logger.info(f"Recall queries: {queries}")
-        return recall(self.openalex_client, queries, from_year=from_year, to_year=to_year,
+        plan = self.recall_plan(structured_query, query)
+        self.logger.info(f"Recall plan: {plan}")
+        return recall(self.openalex_client, plan['queries'], from_year=from_year, to_year=to_year,
                       min_citations=min_citations, per_query=self.recall_per_query,
-                      searches=self.recall_searches)
+                      searches=self.recall_searches, semantic_query=plan['semantic_query'])
+    
+    def recall_plan(self, structured_query: Dict, query: Optional[str]) -> Dict:
+        """
+        What recall searches for, reported in search results so the UI can show it:
+        keyword queries, the semantic-search text, and whether citation expansion runs.
+        """
+        if self.retrieval_strategy == 'semantic':
+            queries, semantic_query = [], query
+        else:
+            queries = self._search_queries(structured_query)
+            semantic_query = query if self.semantic_recall else None
+        return {
+            'strategy': self.retrieval_strategy,
+            'queries': queries,
+            'semantic_query': semantic_query,
+            'citation_expansion': bool(self.citation_expansion and self.reranker),
+        }
     
     def rank_candidates(
         self,
@@ -1258,19 +1291,27 @@ def create_literature_searcher(
     openalex_api_key: Optional[str] = None,
     llm_model: str = DEFAULT_LLM_MODEL,
     llm_base_url: Optional[str] = None,
-    retrieval_strategy: str = 'multi_query',
+    retrieval_strategy: str = 'semantic',
     reranker: Optional[str] = None,
-    citation_weight: float = 0.0,
-    citation_expansion: bool = False
+    citation_weight: Optional[float] = None,
+    citation_expansion: Optional[bool] = None,
+    semantic_recall: bool = False
 ) -> LiteratureSearcher:
     """
     Factory function to create a LiteratureSearcher instance.
     reranker is a spec string for retrieval.create_reranker, e.g. "cross-encoder".
+    citation_weight and citation_expansion default to the strategy's values in
+    STRATEGY_DEFAULTS.
     """
+    defaults = STRATEGY_DEFAULTS.get(retrieval_strategy, {})
+    if citation_weight is None:
+        citation_weight = defaults.get('citation_weight', 0.0)
+    if citation_expansion is None:
+        citation_expansion = defaults.get('citation_expansion', False)
     searcher = LiteratureSearcher(openai_api_key, email_for_openalex, openalex_api_key,
                                   llm_model=llm_model, llm_base_url=llm_base_url,
                                   retrieval_strategy=retrieval_strategy, citation_weight=citation_weight,
-                                  citation_expansion=citation_expansion)
+                                  citation_expansion=citation_expansion, semantic_recall=semantic_recall)
     # The embedding reranker reuses the LLM provider's client
     searcher.reranker = create_reranker(reranker, llm_client=searcher.query_processor.client)
     return searcher

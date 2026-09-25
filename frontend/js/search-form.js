@@ -9,7 +9,7 @@
  */
 
 const MODE_HELP = {
-    search: 'Fast: the LLM plans focused searches, then a model ranks every result against your request. Usually 5-10 seconds.',
+    search: 'Fast: finds papers by meaning, adds the key papers they cite, then ranks everything against your request. Usually about 5 seconds.',
     agent: 'Thorough: the LLM runs the searches itself, reads abstracts and explains each pick. Takes 20-60 seconds; filters are set by what you write.',
 };
 

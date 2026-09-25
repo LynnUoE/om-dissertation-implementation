@@ -6,8 +6,8 @@ LitFinder is an LLM-powered academic literature search system. Describe what you
 
 It started as my undergraduate dissertation at the University of Edinburgh (School of Informatics) and has since been extended with LLM tool use:
 
-- **Pipeline search**: an LLM turns the query into focused search queries using **Structured Outputs** (a Pydantic schema). Retrieval is two-stage: several OpenAlex searches recall candidates, then a **cross-encoder reranker** orders them by relevance to the request.
-- **Evaluation**: a 32-query benchmark with graded relevance labels measures every retrieval variant. The reranked pipeline raises nDCG@10 from 0.55 to 0.89-0.92 over the original design ([results](#retrieval-and-evaluation)).
+- **Pipeline search**: OpenAlex **semantic search** finds papers by meaning, **citation expansion** adds the foundational papers they cite, and a **cross-encoder reranker** orders everything by relevance to the request. An LLM reads the request first, with **Structured Outputs** (a Pydantic schema), to pick up constraints such as a date range.
+- **Evaluation**: a 32-query benchmark with graded relevance labels measures every retrieval variant. The current design raises nDCG@10 from 0.55 to 0.95 over the original and needs 2 OpenAlex requests per search instead of 10 ([results](#retrieval-and-evaluation)).
 - **Agent search**: the LLM plans the search itself through **function calling**. It picks from four tools, runs several focused searches in parallel, reads abstracts, and returns a ranked, grounded answer with a reason for each paper.
 - **MCP server**: the same tools are published over the **Model Context Protocol**, so Claude Code, Claude Desktop or any MCP host can search the literature directly.
 - **Provider-agnostic**: works with OpenAI or any OpenAI-compatible API (e.g. Volcano Engine Ark) through `LLM_BASE_URL` / `LLM_MODEL`.
@@ -18,7 +18,7 @@ It started as my undergraduate dissertation at the University of Edinburgh (Scho
 flowchart LR
     subgraph Backend [Flask backend]
         Pipeline["Query processor<br/>(Structured Outputs)"]
-        Searcher["Two-stage retrieval<br/>recall → cross-encoder rerank"]
+        Searcher["Retrieval<br/>semantic search → citation expansion<br/>→ cross-encoder rerank"]
         Agent["Research agent<br/>(function-calling loop)"]
         MCP[mcp_server.py]
         Tools["tools.py<br/>search_papers, get_paper<br/>search_authors, get_author_papers"]
@@ -63,10 +63,11 @@ Set these in `backend/.env`:
 | `LLM_BASE_URL` | OpenAI | Base URL of an OpenAI-compatible provider, e.g. `https://ark.cn-beijing.volces.com/api/v3` |
 | `LLM_API_KEY` | `OPENAI_API_KEY` | Key for the provider at `LLM_BASE_URL` |
 | `AGENT_MAX_STEPS` | `6` | Max LLM calls per agent search |
-| `RETRIEVAL_STRATEGY` | `multi_query` | `multi_query` (two-stage retrieval) or `single_query` (the original pipeline, kept as a baseline) |
+| `RETRIEVAL_STRATEGY` | `semantic` | `semantic` (semantic search + citation expansion), `multi_query` (focused keyword searches) or `single_query` (the original pipeline, kept as a baseline) |
 | `RERANKER` | `cross-encoder` | `none`, `embedding[:model]` or `cross-encoder[:Hugging Face model]`; the default model is `cross-encoder/ms-marco-MiniLM-L-6-v2` |
-| `RERANK_CITATION_WEIGHT` | `0.1` | Weight of a citation-count prior in the final score |
-| `CITATION_EXPANSION` | `false` | Also rerank papers co-cited by the top results (one extra OpenAlex request) |
+| `RERANK_CITATION_WEIGHT` | per strategy | Weight of a citation-count prior in the final score (`semantic` 0.2, `multi_query` 0.1) |
+| `CITATION_EXPANSION` | per strategy | Also rerank papers co-cited by the top results (on for `semantic`) |
+| `SEMANTIC_RECALL` | `false` | `multi_query` only: also run a semantic search on the whole request |
 | `AGENT_RERANK` | `false` | Rerank the agent's `search_papers` results with `RERANKER` |
 | `OPENALEX_API_KEY` | none | OpenAlex API key (recommended) |
 | `RESEARCHER_EMAIL` | `research@example.com` | Contact email sent to OpenAlex |
@@ -74,12 +75,17 @@ Set these in `backend/.env`:
 
 ## Retrieval and Evaluation
 
-### Two-stage retrieval
+### How pipeline search finds papers
 
-The original pipeline joined every term the LLM extracted into one long query (often 50+ words). OpenAlex search matches nearly every term, so such queries returned few results, sometimes none: "speculative decoding for LLM inference" found nothing. Pipeline search now works in two stages (`backend/retrieval.py`):
+The original pipeline joined every term the LLM extracted into one long query (often 50+ words). OpenAlex keyword search matches nearly every term, so such queries returned few results, sometimes none: "speculative decoding for LLM inference" found nothing. Pipeline search now works like this by default (`RETRIEVAL_STRATEGY=semantic`, `backend/retrieval.py`):
 
-1. **Recall.** The LLM writes 3-5 focused queries of 2-6 terms. Each runs twice on OpenAlex, in parallel: a full-text search sorted by relevance, and a title/abstract search sorted by citations. The results are merged with reciprocal rank fusion, which gives about 100-200 candidates.
-2. **Rerank.** A cross-encoder (`ms-marco-MiniLM-L-6-v2`, 22M parameters, runs locally) reads each candidate's title and abstract together with the user's request. The final score is 90% this relevance score and 10% a log-scaled citation prior.
+1. **Semantic search.** The user's whole request goes to OpenAlex's semantic search, which matches the meaning of titles and abstracts across all of OpenAlex, so papers that use different words are found too. It returns up to 50 papers, mostly recent ones that closely match the topic.
+2. **Citation expansion.** Foundational papers are rarely among those matches, but the matches cite them. Papers that several of the best matches cite are fetched in one cheap request (the snowballing a researcher would do by hand).
+3. **Rerank.** A cross-encoder (`ms-marco-MiniLM-L-6-v2`, 22M parameters, runs locally) reads each candidate's title and abstract together with the request. The final score is 80% this relevance score and 20% a log-scaled citation prior.
+
+The LLM still reads the request first, to pick up constraints such as "since 2023". A search costs 2 OpenAlex requests, about US$0.0011, so the free daily budget covers about 900 searches.
+
+The earlier keyword design is still available as `RETRIEVAL_STRATEGY=multi_query`: the LLM writes 3-5 focused queries, each runs as a full-text search by relevance and a title/abstract search by citations, and the ~180 merged candidates are reranked the same way. It costs 10 requests per search.
 
 ### Evaluation
 
@@ -87,25 +93,30 @@ The original pipeline joined every term the LLM extracted into one long query (o
 
 - **Queries:** 32 research requests across ML, biology, medicine, materials, climate and social science.
 - **Canonical papers:** 159 foundational papers picked by hand, 4-5 per query.
-- **Relevance labels:** 2,867 graded labels from a `gpt-4.1` judge, covering every paper any system returned in its top 20.
+- **Relevance labels:** 3,792 graded labels from a `gpt-4.1` judge, covering every paper any system returned in its top 20.
 
 Selected systems (full table in [eval/results.md](eval/results.md)):
 
-| System | nDCG@10 | Recall@20 | Canonical R@20 | Median latency |
-|---|---|---|---|---|
-| Original pipeline (one long query) | 0.550 | 0.149 | 0.006 | 4.5 s |
-| Focused queries, no reranker | 0.731 | 0.229 | 0.370 | 5.5 s |
-| + MiniLM reranker | 0.924 | 0.364 | 0.234 | 6.1 s |
-| **+ MiniLM + 10% citation prior (default)** | **0.893** | **0.343** | **0.391** | **6.1 s** |
-| + bge-reranker-v2-m3 (568M) | 0.942 | 0.363 | 0.248 | 18.0 s |
-| Agent search (gpt-4o) | 0.625 | 0.104 | 0.250 | 15.0 s |
+| System | nDCG@10 | Recall@20 | Canonical R@20 | Median latency | OpenAlex requests |
+|---|---|---|---|---|---|
+| Original pipeline (one long query) | 0.550 | 0.098 | 0.006 | 4.5 s | 1 |
+| Keyword queries, no reranker | 0.731 | 0.147 | 0.370 | 5.5 s | 10 |
+| Keyword queries + MiniLM | 0.924 | 0.232 | 0.234 | 6.1 s | 10 |
+| Keyword queries + MiniLM + 10% citation prior (`multi_query`) | 0.893 | 0.218 | 0.391 | 6.1 s | 10 |
+| … + a semantic search channel (`SEMANTIC_RECALL=true`) | 0.898 | 0.225 | 0.397 | 6.4 s | 11 |
+| Semantic search alone, OpenAlex's order | 0.950 | 0.251 | 0.106 | 3.9 s | 1 |
+| Semantic search + MiniLM + 10% citation prior | 0.969 | 0.253 | 0.106 | 4.1 s | 1 |
+| **Semantic search + citation expansion + MiniLM + 20% prior (default)** | **0.947** | **0.251** | **0.341** | **4.9 s** | **2** |
+| Agent search (gpt-4o) | 0.625 | 0.065 | 0.250 | 15.0 s | ~2-3 |
 
 What the numbers show:
 
-- **Reranking is where the gain is.** Focused queries alone help, but reranking lifts nDCG@10 from 0.55 to 0.92 (p < 0.001, paired randomization test).
+- **Reranking fixed the keyword pipeline.** Focused keyword queries alone help, but reranking lifts nDCG@10 from 0.55 to 0.92 (p < 0.001, paired randomization test).
+- **Semantic search finds topically relevant papers better than any keyword design.** On its own, in OpenAlex's order, it scores nDCG@10 0.95 with 1 request instead of 10.
+- **Topical relevance and foundational papers pull in different directions.** Semantic search returns only 19 of the 159 canonical papers; the closer a variant matches the topic, the more landmark papers such as DDPM are crowded out by newer papers whose wording matches the request more closely. Citation expansion plus a 20% citation prior brings canonical recall back from 0.11 to 0.34.
+- **The default is the best balance.** Against the keyword pipeline (with a semantic channel added), it has higher nDCG@10 (0.947 vs 0.898, p = 0.02) and Recall@20 (p < 0.001), similar canonical recall (0.34 vs 0.40, p = 0.36), is 1.5 s faster, and costs a tenth of the OpenAlex budget.
 - **A small cross-encoder is enough.** MiniLM (22M) scores the same as bge-reranker-v2-m3 (568M, p = 0.27) at a third of the latency. OpenAI embeddings score about the same but cost an API call per search.
-- **Topical relevance and foundational papers pull in different directions.** The better a variant matches topics, the more often landmark papers such as DDPM are pushed out by newer papers whose titles match the query more closely. A 10% citation prior raises canonical recall from 0.23 to 0.39 (p = 0.001). nDCG@10 goes from 0.92 to 0.89, a change that is not significant (p = 0.14).
-- **Some ideas didn't help, so they are off by default.** Citation expansion (snowballing from the top results' references) made no measurable difference. Reranking the agent's tool results raised its nDCG (0.63 → 0.71, p = 0.03) but cut its canonical recall from 0.25 to 0.15.
+- **Not every idea helped.** Citation expansion does nothing for the keyword pipeline, whose candidates already include the classics. Reranking the agent's tool results raised its nDCG (0.63 → 0.71, p = 0.03) but cut its canonical recall from 0.25 to 0.15, so it's off by default.
 - **The agent scores lower on these metrics by design.** It recommends about 5-6 papers after about 2 tool calls, while the metrics reward a full top 10/20. Its strengths are explanations, researchers and multi-part questions, which these metrics don't measure.
 
 Run it with `python eval/run_eval.py`.
@@ -228,9 +239,9 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The 61 tests run offline in under a second. Fake LLM, OpenAlex and reranker clients stand in for the real services. The tests cover:
+The 70 tests run offline in under a second. Fake LLM, OpenAlex and reranker clients stand in for the real services. The tests cover:
 
-- two-stage retrieval: query fusion, duplicate merging, filters, reranking, the citation prior, citation expansion, OpenAlex budget errors
+- retrieval: semantic search, keyword query fusion, duplicate merging, filters, reranking, the citation prior, citation expansion, strategy defaults, OpenAlex budget errors and timeouts
 - the evaluation metrics
 - tool schemas and argument validation
 - the agent loop: `tool_call_id` pairing, parallel calls, invented IDs, forced final step, API errors
@@ -249,7 +260,7 @@ backend/
 ├── llm.py                 # LLM client config, Structured Outputs helpers
 ├── query_processor.py     # Query analysis for pipeline search
 ├── literature_searcher.py # Pipeline search and publication details
-├── retrieval.py           # Two-stage retrieval: recall, rerankers, citation expansion
+├── retrieval.py           # Retrieval: semantic and keyword recall, rerankers, citation expansion
 ├── research_analyzer.py   # LLM analysis of publications
 ├── openalex_client.py     # OpenAlex API client
 └── .env.example           # Configuration template
@@ -271,7 +282,7 @@ docker compose up --build                      # web app at http://localhost:500
 docker compose --profile mcp up --build        # also the MCP server at http://localhost:8000/mcp
 ```
 
-The web app runs under gunicorn (`backend/wsgi.py`). Ports are published on localhost only, because the app has no login and spends your API credits; `LITFINDER_PORT` and `LITFINDER_MCP_PORT` change the host ports.
+The web app runs under gunicorn (`backend/wsgi.py`). The image sets `HF_HUB_OFFLINE=1`, so it starts without contacting Hugging Face; set it to `0` if you change `RERANKER` to a model that isn't in the image. Ports are published on localhost only, because the app has no login and spends your API credits; `LITFINDER_PORT` and `LITFINDER_MCP_PORT` change the host ports.
 
 To use the image as an MCP server over stdio, e.g. in Claude Desktop, have the host run it with `-i`:
 
@@ -293,9 +304,9 @@ Without Docker, Nginx can serve `frontend/` and proxy `/api/` to Flask. `config/
 
 ## Known Limitations and Roadmap
 
-- **Recall is still bounded by OpenAlex keyword search.** About 40% of the canonical papers never reach the candidate pool, so no reranker can find them. Next step: dense retrieval over paper embeddings (e.g. SPECTER2) as a second recall channel.
+- **Foundational papers are still the weak spot.** The default finds about a third of the hand-picked canonical papers in its top 20. Semantic search returns at most 50 papers, and a paper whose OpenAlex abstract is wrong can't be ranked correctly. Next steps: a larger candidate pool from a self-hosted index, and letting an agent follow citation trails.
 - **The benchmark labels come from an LLM.** Spot checks look reasonable and 147 of 159 canonical papers were judged highly relevant, but individual labels can be wrong, and 32 queries is a small set.
-- **OpenAlex bills every search.** A pipeline search makes about 10 requests; the free daily budget with an API key covers about 1,000. OpenAlex data also has errors: the LoRA paper is stored under the wrong title, and DDPM has another paper's abstract.
+- **OpenAlex bills every search.** A pipeline search makes 2 requests (10 with `multi_query`); the free daily budget with an API key covers about 900 searches. Semantic search is also limited to 1 request per second. OpenAlex data has errors too: the LoRA paper is stored under the wrong title, and DDPM has another paper's abstract.
 - **Agent reasons are free text.** Paper IDs are grounded, but a reason can still contain small inaccuracies.
 - **Non-OpenAI providers.** The JSON-mode fallback is unit-tested but has not yet been run against a non-OpenAI provider.
 
