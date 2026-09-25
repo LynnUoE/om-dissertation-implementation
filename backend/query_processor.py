@@ -19,9 +19,11 @@ class QueryAnalysis(BaseModel):
     research_areas: List[str] = Field(description="Broader research fields or disciplines relevant to the query")
     specific_topics: List[str] = Field(description="Specific research topics, problems or phenomena being investigated")
     methodologies: List[str] = Field(description="Relevant research methods, approaches or techniques")
-    temporal_context: str = Field(description='Time period or date range mentioned, or "current" if none')
+    temporal_context: str = Field(description='Publication period the request asks for, such as "since 2023", '
+                                              '"2015-2020" or "last 5 years", or "current" if it states none')
     search_keywords: List[str] = Field(description="Additional keywords that would help identify relevant literature")
     expanded_terms: List[TermExpansion] = Field(description="Expansions for the 5 most important extracted terms")
+    search_queries: List[str] = Field(description="3-5 focused keyword queries of 2-6 terms each that together cover the request")
 
 
 class QueryProcessor:
@@ -54,6 +56,14 @@ class QueryProcessor:
         - Identify potential interdisciplinary connections
         - For the 5 most important research areas, topics or methodologies, list alternative phrasings,
           broader/narrower terms and related concepts that might appear in academic literature
+        - Write 3-5 search queries for a scholarly keyword search engine that only returns papers containing
+          every term, so keep each query to 2-6 key terms. The first query names the core topic in the
+          request's own words. The others use alternative names for the same topic, or name specific
+          methods and sub-problems within it, as they would appear in paper titles. Every query must be
+          specific to this request: no broad field names (such as "machine learning" or "model
+          optimization"), no years, and no filler words such as "research", "techniques" or "methods"
+        - If the query limits publication dates (for example "published since 2023"), put that period in
+          temporal_context rather than in the search queries
         
         Query: {query}
         """
@@ -176,6 +186,7 @@ class QueryProcessor:
             'research_areas': structured_response.get('research_areas', []),
             'expertise': structured_response.get('specific_topics', []) + structured_response.get('methodologies', []),
             'search_keywords': structured_response.get('search_keywords', []),
+            'search_queries': structured_response.get('search_queries', []),
             'requirements': []  # Compatibility with existing interface
         }
         

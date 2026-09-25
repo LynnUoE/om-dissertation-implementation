@@ -76,6 +76,7 @@ def test_query_processor_single_structured_call():
         "temporal_context": "current",
         "search_keywords": ["GNN"],
         "expanded_terms": [{"term": "Graph Neural Networks", "related_terms": ["GNNs", "gnns", "message passing"]}],
+        "search_queries": ["graph neural networks drug discovery", "molecular property prediction"],
     }
     fake = FakeLLM([completion(content=json.dumps(reply))])
     result = make_processor(fake).process_query("  gnn   for drugs ")
@@ -85,6 +86,7 @@ def test_query_processor_single_structured_call():
     assert result["research_areas"] == ["Computer Science"]
     assert result["expertise"] == ["Graph Neural Networks", "Deep Learning"]
     assert result["expanded_terms"] == {"Graph Neural Networks": ["GNNs", "message passing"]}  # deduped
+    assert result["search_queries"] == ["graph neural networks drug discovery", "molecular property prediction"]
     assert "temporal_context" not in result  # "current" is the default
 
 

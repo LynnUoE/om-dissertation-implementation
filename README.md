@@ -6,7 +6,8 @@ LitFinder is an LLM-powered academic literature search system. Describe what you
 
 It started as my undergraduate dissertation at the University of Edinburgh (School of Informatics) and has since been extended with LLM tool use:
 
-- **Pipeline search**: an LLM turns the query into structured search terms using **Structured Outputs** (a Pydantic schema), then OpenAlex is searched and the results are scored.
+- **Pipeline search**: an LLM turns the query into focused search queries using **Structured Outputs** (a Pydantic schema). Retrieval is two-stage: several OpenAlex searches recall candidates, then a **cross-encoder reranker** orders them by relevance to the request.
+- **Evaluation**: a 32-query benchmark with graded relevance labels measures every retrieval variant. The reranked pipeline raises nDCG@10 from 0.55 to 0.89-0.92 over the original design ([results](#retrieval-and-evaluation)).
 - **Agent search**: the LLM plans the search itself through **function calling**. It picks from four tools, runs several focused searches in parallel, reads abstracts, and returns a ranked, grounded answer with a reason for each paper.
 - **MCP server**: the same tools are published over the **Model Context Protocol**, so Claude Code, Claude Desktop or any MCP host can search the literature directly.
 - **Provider-agnostic**: works with OpenAI or any OpenAI-compatible API (e.g. Volcano Engine Ark) through `LLM_BASE_URL` / `LLM_MODEL`.
@@ -17,7 +18,7 @@ It started as my undergraduate dissertation at the University of Edinburgh (Scho
 flowchart LR
     subgraph Backend [Flask backend]
         Pipeline["Query processor<br/>(Structured Outputs)"]
-        Searcher[Literature searcher]
+        Searcher["Two-stage retrieval<br/>recall → cross-encoder rerank"]
         Agent["Research agent<br/>(function-calling loop)"]
         MCP[mcp_server.py]
         Tools["tools.py<br/>search_papers, get_paper<br/>search_authors, get_author_papers"]
@@ -62,9 +63,52 @@ Set these in `backend/.env`:
 | `LLM_BASE_URL` | OpenAI | Base URL of an OpenAI-compatible provider, e.g. `https://ark.cn-beijing.volces.com/api/v3` |
 | `LLM_API_KEY` | `OPENAI_API_KEY` | Key for the provider at `LLM_BASE_URL` |
 | `AGENT_MAX_STEPS` | `6` | Max LLM calls per agent search |
+| `RETRIEVAL_STRATEGY` | `multi_query` | `multi_query` (two-stage retrieval) or `single_query` (the original pipeline, kept as a baseline) |
+| `RERANKER` | `cross-encoder` | `none`, `embedding[:model]` or `cross-encoder[:Hugging Face model]`; the default model is `cross-encoder/ms-marco-MiniLM-L-6-v2` |
+| `RERANK_CITATION_WEIGHT` | `0.1` | Weight of a citation-count prior in the final score |
+| `CITATION_EXPANSION` | `false` | Also rerank papers co-cited by the top results (one extra OpenAlex request) |
+| `AGENT_RERANK` | `false` | Rerank the agent's `search_papers` results with `RERANKER` |
 | `OPENALEX_API_KEY` | none | OpenAlex API key (recommended) |
 | `RESEARCHER_EMAIL` | `research@example.com` | Contact email sent to OpenAlex |
 | `PORT` | `5001` | API port (macOS AirPlay Receiver occupies 5000) |
+
+## Retrieval and Evaluation
+
+### Two-stage retrieval
+
+The original pipeline joined every term the LLM extracted into one long query (often 50+ words). OpenAlex search matches nearly every term, so such queries returned few results, sometimes none: "speculative decoding for LLM inference" found nothing. Pipeline search now works in two stages (`backend/retrieval.py`):
+
+1. **Recall.** The LLM writes 3-5 focused queries of 2-6 terms. Each runs twice on OpenAlex, in parallel: a full-text search sorted by relevance, and a title/abstract search sorted by citations. The results are merged with reciprocal rank fusion, which gives about 100-200 candidates.
+2. **Rerank.** A cross-encoder (`ms-marco-MiniLM-L-6-v2`, 22M parameters, runs locally) reads each candidate's title and abstract together with the user's request. The final score is 90% this relevance score and 10% a log-scaled citation prior.
+
+### Evaluation
+
+`eval/` contains the benchmark, described in [eval/README.md](eval/README.md):
+
+- **Queries:** 32 research requests across ML, biology, medicine, materials, climate and social science.
+- **Canonical papers:** 159 foundational papers picked by hand, 4-5 per query.
+- **Relevance labels:** 2,867 graded labels from a `gpt-4.1` judge, covering every paper any system returned in its top 20.
+
+Selected systems (full table in [eval/results.md](eval/results.md)):
+
+| System | nDCG@10 | Recall@20 | Canonical R@20 | Median latency |
+|---|---|---|---|---|
+| Original pipeline (one long query) | 0.550 | 0.149 | 0.006 | 4.5 s |
+| Focused queries, no reranker | 0.731 | 0.229 | 0.370 | 5.5 s |
+| + MiniLM reranker | 0.924 | 0.364 | 0.234 | 6.1 s |
+| **+ MiniLM + 10% citation prior (default)** | **0.893** | **0.343** | **0.391** | **6.1 s** |
+| + bge-reranker-v2-m3 (568M) | 0.942 | 0.363 | 0.248 | 18.0 s |
+| Agent search (gpt-4o) | 0.625 | 0.104 | 0.250 | 15.0 s |
+
+What the numbers show:
+
+- **Reranking is where the gain is.** Focused queries alone help, but reranking lifts nDCG@10 from 0.55 to 0.92 (p < 0.001, paired randomization test).
+- **A small cross-encoder is enough.** MiniLM (22M) scores the same as bge-reranker-v2-m3 (568M, p = 0.27) at a third of the latency. OpenAI embeddings score about the same but cost an API call per search.
+- **Topical relevance and foundational papers pull in different directions.** The better a variant matches topics, the more often landmark papers such as DDPM are pushed out by newer papers whose titles match the query more closely. A 10% citation prior raises canonical recall from 0.23 to 0.39 (p = 0.001). nDCG@10 goes from 0.92 to 0.89, a change that is not significant (p = 0.14).
+- **Some ideas didn't help, so they are off by default.** Citation expansion (snowballing from the top results' references) made no measurable difference. Reranking the agent's tool results raised its nDCG (0.63 → 0.71, p = 0.03) but cut its canonical recall from 0.25 to 0.15.
+- **The agent scores lower on these metrics by design.** It recommends about 5-6 papers after about 2 tool calls, while the metrics reward a full top 10/20. Its strengths are explanations, researchers and multi-part questions, which these metrics don't measure.
+
+Run it with `python eval/run_eval.py`.
 
 ## Agent Search (Function Calling)
 
@@ -170,8 +214,8 @@ Both call the same `tools.py` code.
 | `POST /api/agent-search` | Agent search; `options.max_steps` caps LLM calls (2-10) |
 | `POST /api/advanced-search` | Search with explicit research areas, topics and methodologies |
 | `POST /api/interdisciplinary-search` | Search across several disciplines |
-| `GET /api/publication/{id}` | Publication details (OpenAlex ID or DOI URL) |
-| `GET /api/publication/{id}/analyze` | LLM analysis of a publication for a query |
+| `GET /api/publication/{id}` | Publication details and its most-cited references (OpenAlex ID or DOI) |
+| `GET /api/publication/{id}/analyze` | LLM reading notes for a publication, from its abstract |
 | `POST /api/process-query` | Structured query analysis without searching |
 | `GET /api/health_check` | Health and request stats |
 
@@ -184,8 +228,10 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The 31 tests run offline in under a second. Fake LLM and OpenAlex clients stand in for the real services. The tests cover:
+The 61 tests run offline in under a second. Fake LLM, OpenAlex and reranker clients stand in for the real services. The tests cover:
 
+- two-stage retrieval: query fusion, duplicate merging, filters, reranking, the citation prior, citation expansion, OpenAlex budget errors
+- the evaluation metrics
 - tool schemas and argument validation
 - the agent loop: `tool_call_id` pairing, parallel calls, invented IDs, forced final step, API errors
 - the Structured Outputs fallback
@@ -201,11 +247,13 @@ backend/
 ├── mcp_server.py          # MCP server exposing the tools
 ├── llm.py                 # LLM client config, Structured Outputs helpers
 ├── query_processor.py     # Query analysis for pipeline search
-├── literature_searcher.py # Pipeline search, scoring, publication details
+├── literature_searcher.py # Pipeline search and publication details
+├── retrieval.py           # Two-stage retrieval: recall, rerankers, citation expansion
 ├── research_analyzer.py   # LLM analysis of publications
 ├── openalex_client.py     # OpenAlex API client
 └── .env.example           # Configuration template
 frontend/                  # Static HTML/CSS/JS UI
+eval/                      # Retrieval benchmark: queries, labels, runs, results
 tests/                     # Offline unit tests
 config/nginx.conf          # Example Nginx config for deployment
 .mcp.json                  # Registers the MCP server for Claude Code
@@ -217,8 +265,9 @@ In production, Nginx can serve `frontend/` and proxy `/api/` to Flask. `config/n
 
 ## Known Limitations and Roadmap
 
-- **Retrieval quality is bounded by OpenAlex keyword search.** Broad matches can outrank the most relevant papers, and some canonical papers are missed. Next step: two-stage retrieval, where several focused queries are recalled and then reranked with embeddings or a reranker model.
-- **No evaluation set yet.** Next step: a small labelled query set to measure nDCG@10 and Recall@20 for pipeline vs agent search.
+- **Recall is still bounded by OpenAlex keyword search.** About 40% of the canonical papers never reach the candidate pool, so no reranker can find them. Next step: dense retrieval over paper embeddings (e.g. SPECTER2) as a second recall channel.
+- **The benchmark labels come from an LLM.** Spot checks look reasonable and 147 of 159 canonical papers were judged highly relevant, but individual labels can be wrong, and 32 queries is a small set.
+- **OpenAlex bills every search.** A pipeline search makes about 10 requests; the free daily budget with an API key covers about 1,000. OpenAlex data also has errors: the LoRA paper is stored under the wrong title, and DDPM has another paper's abstract.
 - **Agent reasons are free text.** Paper IDs are grounded, but a reason can still contain small inaccuracies.
 - **Non-OpenAI providers.** The JSON-mode fallback is unit-tested but has not yet been run against a non-OpenAI provider.
 
@@ -226,6 +275,8 @@ In production, Nginx can serve `frontend/` and proxy `/api/` to Flask. `config/n
 
 - **Server won't start on macOS.** Port 5000 is taken by AirPlay Receiver; the default is 5001.
 - **Searches fail with "rate-limited".** Add `OPENALEX_API_KEY` to `backend/.env`.
+- **"OpenAlex daily request budget exhausted".** The free daily budget is used up; the message says when it resets.
+- **The first start is slow.** The server loads the reranker at startup, and the first time it downloads the model (about 90 MB) from Hugging Face.
 - **Search returns 502.** The `message` field contains the LLM or OpenAlex error. Common causes are an invalid key (`invalid_api_key`) and exhausted credits (`insufficient_quota`).
 - **A reasoning model (o-series, gpt-5) errors on `temperature`.** Use a model that accepts it, e.g. `gpt-4o` or `gpt-4.1`.
 

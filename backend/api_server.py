@@ -27,6 +27,19 @@ class Config:
     LLM_BASE_URL = os.getenv("LLM_BASE_URL") or None
     LLM_MODEL = os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
     AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))  # Max LLM calls per agent search
+    # Pipeline search: multi_query (focused searches + rerank) or single_query (original baseline)
+    RETRIEVAL_STRATEGY = os.getenv("RETRIEVAL_STRATEGY", "multi_query")
+    # none | embedding[:model] | cross-encoder[:model]; see retrieval.create_reranker
+    RERANKER = os.getenv("RERANKER", "cross-encoder")
+    # Weight of a citation-count prior in the final score. 0.1 keeps foundational papers in the
+    # results at little cost to topical relevance (see eval/results.md)
+    RERANK_CITATION_WEIGHT = float(os.getenv("RERANK_CITATION_WEIGHT", "0.1"))
+    # Add papers co-cited by the top candidates (one extra OpenAlex request per search; made no
+    # measurable difference in eval/, so off by default)
+    CITATION_EXPANSION = os.getenv("CITATION_EXPANSION", "false").lower() == "true"
+    # Rerank the agent's search_papers results with RERANKER (raises nDCG, but the agent then
+    # recommends fewer foundational papers; see eval/results.md)
+    AGENT_RERANK = os.getenv("AGENT_RERANK", "false").lower() == "true"
     RESEARCHER_EMAIL = os.getenv("RESEARCHER_EMAIL", "research@example.com")
     OPENALEX_API_KEY = os.getenv("OPENALEX_API_KEY")  # Optional
     # Relative paths resolve against this file, so the server can start from any cwd
@@ -71,7 +84,11 @@ def get_literature_searcher() -> LiteratureSearcher:
             Config.RESEARCHER_EMAIL,
             Config.OPENALEX_API_KEY,
             llm_model=Config.LLM_MODEL,
-            llm_base_url=Config.LLM_BASE_URL
+            llm_base_url=Config.LLM_BASE_URL,
+            retrieval_strategy=Config.RETRIEVAL_STRATEGY,
+            reranker=Config.RERANKER,
+            citation_weight=Config.RERANK_CITATION_WEIGHT,
+            citation_expansion=Config.CITATION_EXPANSION
         )
     return literature_searcher
 
@@ -87,7 +104,8 @@ def get_research_agent() -> ResearchAgent:
             model=Config.LLM_MODEL,
             openalex_client=searcher.openalex_client,
             format_paper=searcher.format_publication,
-            max_steps=Config.AGENT_MAX_STEPS
+            max_steps=Config.AGENT_MAX_STEPS,
+            reranker=searcher.reranker if Config.AGENT_RERANK else None
         )
     return research_agent
 
@@ -425,7 +443,7 @@ def get_publication_details(publication_id):
             'publication_id': publication_id
         }), 500
 
-@app.route('/api/publication/<publication_id>/analyze', methods=['GET'])
+@app.route('/api/publication/<path:publication_id>/analyze', methods=['GET'])
 def analyze_publication(publication_id):
     """
     Analyze a specific publication in detail
@@ -650,8 +668,14 @@ def initialize_app():
         Config.validate()
         
         # Initialize literature searcher (this will initialize all other components)
-        get_literature_searcher()
-        
+        searcher = get_literature_searcher()
+
+        # Load the reranker model now, so the first search isn't slow and a bad RERANKER fails
+        # at startup. In debug mode only the reloader's child process serves requests.
+        if searcher.reranker is not None and (not Config.DEBUG or os.environ.get("WERKZEUG_RUN_MAIN") == "true"):
+            logger.info(f"Loading reranker {searcher.reranker.name}")
+            searcher.reranker.score("warm up", ["warm up"])
+
         logger.info("Application initialized successfully")
         return True
     except Exception as e:
