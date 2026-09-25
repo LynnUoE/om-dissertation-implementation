@@ -3,135 +3,86 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Literature Search Engine</title>
-    <link rel="stylesheet" href="css/style.css">
+    <title>LitFinder · Find research papers</title>
+    <meta name="description" content="Describe your research in plain language and find the most relevant papers across 300M+ scholarly works.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,600&display=swap">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Load JavaScript files in the correct order -->
-    <script src="js/main.js"></script>
-    <script src="js/api-service.js"></script>
-    <script src="js/query-processor.js"></script>
+    <link rel="stylesheet" href="css/app.css">
+    <script src="js/common.js" defer></script>
+    <script src="js/api-service.js" defer></script>
+    <script src="js/search-form.js" defer></script>
+    <script src="js/home.js" defer></script>
 </head>
 <body>
-    <header>
+    <header class="site-header">
         <div class="container">
-            <div class="logo">
-                <h1>LitFinder</h1>
-            </div>
-            <nav>
-                <ul>
-                    <li><a href="index.html" class="active">Home</a></li>
-                    <li><a href="#">About</a></li>
-                    <li><a href="#">Contact</a></li>
-                </ul>
+            <a class="brand" href="index.html"><span class="brand-mark"><i class="fas fa-book-open"></i></span>LitFinder</a>
+            <nav class="site-nav" aria-label="Main">
+                <a href="index.html" class="active"><i class="fas fa-magnifying-glass"></i> <span class="label">Search</span></a>
+                <a href="saved.html"><i class="far fa-bookmark"></i> <span class="label">Saved</span><span class="nav-count" id="saved-count"></span></a>
             </nav>
         </div>
     </header>
 
     <main>
         <section class="hero">
-            <div class="container">
-                <h1>Find Relevant Research Literature</h1>
-                <p>Discover publications across disciplines that match your research interests</p>
+            <div class="container narrow">
+                <h1>Find the papers that <span class="grad">actually matter</span></h1>
+                <p>Describe what you're researching in plain language. LitFinder turns it into focused searches over 300M+ scholarly works and ranks what it finds by how well each paper matches.</p>
             </div>
         </section>
 
-        <section class="search-section">
-            <div class="container">
-                <div class="search-container">
-                    <h2>What research publications are you looking for?</h2>
-                    <form id="research-query-form">
-                        <div class="form-group">
-                            <label for="research-query">Describe your research interests:</label>
-                            <textarea id="research-query" name="query" rows="4" placeholder="Example: Looking for recent publications on quantum error correction and superconducting qubits with applications in quantum machine learning."></textarea>
-                        </div>
-                        
-                        <div class="search-options">
-                            <div class="form-group">
-                                <label>Research Areas:</label>
-                                <div class="tags-input" id="research-areas-container">
-                                    <input type="text" id="research-area-input" placeholder="Add a research area...">
-                                </div>
-                            </div>
-                            
-                            <div class="form-group">
-                                <label>Key Topics:</label>
-                                <div class="tags-input" id="expertise-container">
-                                    <input type="text" id="expertise-input" placeholder="Add key topics...">
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label for="publication-type">Publication Type:</label>
-                            <select id="publication-type" name="publication-type">
-                                <option value="all">All Publication Types</option>
-                                <option value="journal-article">Journal Articles</option>
-                                <option value="conference-paper">Conference Papers</option>
-                                <option value="review">Review Papers</option>
-                                <option value="book-chapter">Book Chapters</option>
-                                <option value="preprint">Preprints</option>
-                            </select>
-                        </div>
-                        
-                        <div class="form-group">
-                            <label>Publication Year Range:</label>
-                            <div class="range-selector">
-                                <div class="year-input">
-                                    <label for="year-from">From:</label>
-                                    <input type="number" id="year-from" min="1900" max="2025" value="2020">
-                                </div>
-                                <div class="year-input">
-                                    <label for="year-to">To:</label>
-                                    <input type="number" id="year-to" min="1900" max="2025" value="2025">
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <div class="form-group agent-toggle">
-                            <label for="agent-mode">
-                                <input type="checkbox" id="agent-mode" name="agent-mode">
-                                Agent mode: let the LLM plan and run the searches itself
-                            </label>
-                            <small>Slower, but better for multi-part questions and finding researchers. Uses only your description; the filters above are ignored.</small>
-                        </div>
-                        
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">
-                                <i class="fas fa-search"></i> Find Publications
-                            </button>
-                        </div>
-                    </form>
+        <section class="home-search">
+            <div class="container narrow">
+                <form id="search-form" class="search-box" novalidate></form>
+                <p class="mode-help" id="mode-help"></p>
+
+                <div class="suggestions" id="recent-block" hidden>
+                    <h2>Recent searches <button type="button" class="link-btn" id="clear-recent">Clear</button></h2>
+                    <div class="chip-row" id="recent-searches"></div>
+                </div>
+
+                <div class="suggestions">
+                    <h2>Try an example</h2>
+                    <div class="chip-row" id="examples"></div>
                 </div>
             </div>
         </section>
 
-        <section class="features">
+        <section class="how">
             <div class="container">
-                <h2>Why Use LitFinder?</h2>
-                <div class="features-grid">
-                    <div class="feature-card">
-                        <i class="fas fa-book-open"></i>
-                        <h3>Comprehensive Coverage</h3>
-                        <p>Search across millions of publications from journals, conferences, and repositories.</p>
+                <h2>How it works</h2>
+                <div class="how-grid">
+                    <div class="how-card">
+                        <div class="step">1</div>
+                        <h3>Understands your request</h3>
+                        <p>An LLM turns your description into 3-5 short, focused search queries and picks up any date range you mention.</p>
                     </div>
-                    <div class="feature-card">
-                        <i class="fas fa-chart-line"></i>
-                        <h3>Relevance Ranking</h3>
-                        <p>Our algorithms analyze citation patterns to find the most impactful research.</p>
+                    <div class="how-card">
+                        <div class="step">2</div>
+                        <h3>Searches OpenAlex</h3>
+                        <p>Each query runs twice across 300M+ works: once for the best keyword matches and once for the most-cited papers on the topic.</p>
                     </div>
-                    <div class="feature-card">
-                        <i class="fas fa-lightbulb"></i>
-                        <h3>Research Insights</h3>
-                        <p>Get detailed analysis of publication trends and emerging research directions.</p>
+                    <div class="how-card">
+                        <div class="step">3</div>
+                        <h3>Ranks by meaning</h3>
+                        <p>A cross-encoder reads every title and abstract against your request. Relevance decides the order, with a small boost for well-cited papers so the classics don't get lost.</p>
                     </div>
+                </div>
+                <div class="how-agent">
+                    <i class="fas fa-wand-magic-sparkles"></i>
+                    <p><strong>Agent mode</strong> lets the LLM run the searches itself: it reads abstracts, follows up on promising leads, looks up researchers, and explains why it picked each paper. It's slower but handles multi-part questions and "who works on X?" well.</p>
                 </div>
             </div>
         </section>
     </main>
 
-    <footer>
+    <footer class="site-footer">
         <div class="container">
-            <p>&copy; 2025 LitFinder. All rights reserved.</p>
+            <span>Paper data from <a href="https://openalex.org" target="_blank" rel="noopener">OpenAlex</a></span>
+            <a href="https://github.com/LynnUoE/om-dissertation-implementation" target="_blank" rel="noopener"><i class="fab fa-github"></i> Source on GitHub</a>
         </div>
     </footer>
 </body>
