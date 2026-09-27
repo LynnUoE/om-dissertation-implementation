@@ -128,7 +128,15 @@ What the numbers show:
 | gpt-4.1-mini | 0.949 | 0.347 | US$0.00077 |
 | **gpt-4o-mini (default)** | **0.949** | **0.347** | **US$0.00028** |
 
-The agent is a different story: it plans every search, so model quality matters (see `eval/results.md`).
+The agent is a different story: it plans every search, so model quality matters. The first runs with cheaper models exposed a trap in the search tool. gpt-4o-mini added date and citation filters nobody asked for and sorted by "recent"; at the time, a search sorted by date or citations matched full text, so it returned recent papers that merely mention the terms (brand design, battery materials for a diffusion-models query), and the model then wrote plausible reasons for them. Non-relevance sorts now match titles and abstracts only, and the prompt forbids unrequested filters and off-topic picks:
+
+| Agent model | nDCG@10 before → after the fix | Canonical R@20 after | Cost per search | Latency |
+|---|---|---|---|---|
+| gpt-4o (default) | 0.625 → 0.604 (n.s.) | 0.269 | US$0.027 | 12.2 s |
+| gpt-4.1-mini | 0.515 → 0.532 (n.s.) | 0.206 | US$0.0050 | 5.6 s |
+| gpt-4o-mini | 0.200 → 0.557 (p < 0.001) | 0.269 | US$0.0021 | 6.3 s |
+
+After the fix, gpt-4o-mini is close to gpt-4o (nDCG@10 0.557 vs 0.604, p = 0.085; the same canonical recall) at 1/13 of the cost and half the latency, so `LLM_MODEL=gpt-4o-mini` is a reasonable budget setting. The default stays gpt-4o because the quality of the agent's reasons isn't measured yet. gpt-4.1-mini is significantly worse than gpt-4o (p = 0.011).
 
 Run it with `python eval/run_eval.py`.
 
@@ -250,7 +258,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The 70 tests run offline in under a second. Fake LLM, OpenAlex and reranker clients stand in for the real services. The tests cover:
+The 73 tests run offline in under a second. Fake LLM, OpenAlex and reranker clients stand in for the real services. The tests cover:
 
 - retrieval: semantic search, keyword query fusion, duplicate merging, filters, reranking, the citation prior, citation expansion, strategy defaults, OpenAlex budget errors and timeouts
 - the evaluation metrics

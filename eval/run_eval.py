@@ -92,9 +92,14 @@ SYSTEMS: Dict[str, Dict] = {
                                                     "about": "Default pipeline, query analysis by gpt-4.1-mini"},
     "semantic+minilm+cite0.2+expand@gpt-4o-mini": {**DEFAULT_CONFIG, "model": "gpt-4o-mini",
                                                    "about": "Default pipeline, query analysis by gpt-4o-mini"},
-    "agent": {"kind": "agent", "about": "Function-calling agent (returns up to ~10 papers)"},
-    "agent@gpt-4.1-mini": {"kind": "agent", "model": "gpt-4.1-mini", "about": "Agent with gpt-4.1-mini"},
-    "agent@gpt-4o-mini": {"kind": "agent", "model": "gpt-4o-mini", "about": "Agent with gpt-4o-mini"},
+    "agent": {"kind": "agent", "about": "Function-calling agent, gpt-4o (runs made before the tool fix below)"},
+    "agent@gpt-4.1-mini": {"kind": "agent", "model": "gpt-4.1-mini", "about": "Agent with gpt-4.1-mini (before the tool fix)"},
+    "agent@gpt-4o-mini": {"kind": "agent", "model": "gpt-4o-mini", "about": "Agent with gpt-4o-mini (before the tool fix)"},
+    # After the tool fix: citation/date-sorted searches match titles and abstracts only, and the
+    # prompt forbids unrequested filters and off-topic picks
+    "agent-v2": {"kind": "agent", "about": "Agent with the fixed search tool, gpt-4o"},
+    "agent-v2@gpt-4.1-mini": {"kind": "agent", "model": "gpt-4.1-mini", "about": "Agent with the fixed search tool, gpt-4.1-mini"},
+    "agent-v2@gpt-4o-mini": {"kind": "agent", "model": "gpt-4o-mini", "about": "Agent with the fixed search tool, gpt-4o-mini"},
     "agent+rerank": {"kind": "agent", "reranker": MINILM,
                      "about": "Agent whose search_papers tool reranks with the MiniLM cross-encoder"},
 }
@@ -280,8 +285,8 @@ class Runner:
         if result["status"] != "success":
             raise RuntimeError(f"{q['id']}: agent failed: {result.get('message')}")
         usage = result["agent"]["usage"]
-        papers = [{"title": p["title"], "year": (p.get("publication_date") or "")[:4], "abstract": p.get("abstract")}
-                  for p in result["results"]]
+        papers = [{"title": p["title"], "year": (p.get("publication_date") or "")[:4], "abstract": p.get("abstract"),
+                   "reason": p.get("agent_reason")} for p in result["results"]]
         return {"papers": papers, "latency_s": result["metadata"]["processing_time"],
                 "llm_calls": usage["llm_calls"], "llm_tokens": usage["prompt_tokens"] + usage["completion_tokens"],
                 "prompt_tokens": usage["prompt_tokens"], "completion_tokens": usage["completion_tokens"],
@@ -299,10 +304,13 @@ class Runner:
             out = (self.run_agent if config["kind"] == "agent" else self.run_pipeline)(config, q)
             self._check_openalex(q["id"])
             for p in out["papers"]:
-                self.docs.setdefault(title_key(p["title"]), p)
+                self.docs.setdefault(title_key(p["title"]), {k: v for k, v in p.items() if k != "reason"})
             rows[q["id"]] = {
                 "qid": q["id"],
-                "results": [{"key": title_key(p["title"]), "title": p["title"]} for p in out.pop("papers")][:TOP_K],
+                # Agent runs also keep each paper's stated reason, so reasons can be checked against abstracts
+                "results": [{"key": title_key(p["title"]), "title": p["title"],
+                             **({"reason": p["reason"]} if p.get("reason") else {})}
+                            for p in out.pop("papers")][:TOP_K],
                 **{k: (round(v, 2) if isinstance(v, float) else v) for k, v in out.items()},
             }
             print(f"  {system} {q['id']}: {len(rows[q['id']]['results'])} results in {out['latency_s']:.1f}s")

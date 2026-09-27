@@ -418,3 +418,15 @@ def test_query_analysis_can_use_its_own_model(monkeypatch):
     s = create_literature_searcher("k", "e@example.com", llm_model="gpt-4o", query_llm_model="gpt-4o-mini")
     assert s.query_processor.model == "gpt-4o-mini" and s.research_analyzer.model == "gpt-4o"
     assert create_literature_searcher("k", "e@example.com", llm_model="gpt-4o").query_processor.model == "gpt-4o"
+
+
+def test_search_papers_non_relevance_sorts_match_titles_and_abstracts():
+    openalex = FakeOpenAlex()
+    ex = ToolExecutor(openalex)
+    ex.execute("search_papers", search_args(query="graph nets, molecules", sort="recent"))
+    ex.execute("search_papers", search_args(query="graph nets", sort="citations"))
+    ex.execute("search_papers", search_args(query="graph nets", sort="relevance"))
+    recent, cited, relevant = openalex.calls
+    assert recent["query"] == "" and recent["filter_string"] == "title_and_abstract.search:graph nets molecules"
+    assert cited["query"] == "" and cited["filter_string"] == "title_and_abstract.search:graph nets"
+    assert relevant["query"] == "graph nets" and "filter_string" not in relevant

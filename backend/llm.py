@@ -12,6 +12,7 @@ from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from pydantic import BaseModel
 
 DEFAULT_LLM_MODEL = "gpt-4o"
+LLM_TIMEOUT = 60.0  # Seconds per request; our calls normally finish in a few seconds
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -26,9 +27,11 @@ def create_llm_client(api_key: str, base_url: Optional[str] = None) -> OpenAI:
     Create a chat client; base_url switches to an OpenAI-compatible provider.
     Low-tier API keys hit tokens-per-minute limits quickly (an agent search
     sends several large requests), so rate-limited calls are retried with the
-    SDK's exponential backoff more times than its default of 2.
+    SDK's exponential backoff more times than its default of 2. Each attempt
+    times out after LLM_TIMEOUT seconds: the SDK's default of 10 minutes,
+    times 7 attempts, let one stalled connection hang a search for over an hour.
     """
-    return OpenAI(api_key=api_key, base_url=base_url or None, max_retries=6)
+    return OpenAI(api_key=api_key, base_url=base_url or None, max_retries=6, timeout=LLM_TIMEOUT)
 
 
 def json_schema_format(schema: Type[BaseModel]) -> Dict:

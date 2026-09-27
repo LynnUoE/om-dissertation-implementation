@@ -32,16 +32,18 @@ SYSTEM_PROMPT = """You are a research assistant that finds academic literature u
 
 How to work:
 - Break the request into its key concepts and run focused searches of 2-6 key terms. Several narrow searches beat one long query.
-- Apply filters the request implies: publication years, "highly cited", "recent".
+- Use sort "relevance" and leave from_year, to_year and min_citations null, unless the request itself asks for a period, recent work or highly cited work.
 - If the request is about researchers (who works on X, papers by Y), use search_authors and get_author_papers.
 - Judge relevance from titles and abstracts. Use get_paper when an abstract is missing or truncated and the paper looks promising.
+- If a search returns papers that are off-topic, rephrase it with other key terms and search again.
 - If a tool returns an error, fix the arguments and try again.
 - Stop searching once you have enough evidence, usually after 2-4 rounds of tool calls.
 
 Final answer:
 - Recommend only papers and authors that appeared in tool results, using their exact IDs. Never invent IDs.
+- Recommend only papers whose title or abstract is about the request. Recommending fewer papers is better than including off-topic ones.
 - Rank papers by how directly they address the request, not by citation count alone.
-- Each reason must say what the paper actually does, based on its title and abstract."""
+- Each reason must say what the paper actually does, based on its title and abstract. Never claim a paper covers something its abstract doesn't mention."""
 
 
 class SelectedPaper(BaseModel):
