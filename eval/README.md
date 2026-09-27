@@ -46,6 +46,20 @@ python eval/run_eval.py --judge-model gpt-4.1-mini    # label new papers with it
 | Canonical R@20 | Share of the hand-picked canonical papers in the top 20; doesn't depend on the LLM judge |
 | p | Paired randomization test on per-query nDCG@10 against the `single_query` baseline |
 
+## Agent reason faithfulness
+
+Each paper the agent recommends comes with a one-sentence reason. [faithfulness.py](faithfulness.py) asks `gpt-4.1` whether the paper's title and abstract support that reason, ignoring whether the paper fits the request:
+
+- **supported:** every claim about the paper is stated in or directly implied by the title or abstract;
+- **partially_supported:** the main claim holds, but a detail isn't in the abstract or is overstated;
+- **unsupported:** a key claim is missing from the abstract or contradicts it.
+
+Papers without an abstract, or with only a teaser under 100 characters, can't be checked and are counted separately. Verdicts are saved in [faithfulness.jsonl](faithfulness.jsonl) and never re-judged; the summary and every unsupported reason are in [faithfulness.md](faithfulness.md). Only the `.run2` agent runs saved reasons.
+
+```bash
+python eval/faithfulness.py --systems agent-v2.run2 agent-v2@gpt-4o-mini.run2 agent-v2@gpt-4.1-mini.run2
+```
+
 ## Fair comparisons
 
 - All pipeline systems share one cached LLM query analysis per query, so they differ only in retrieval.
@@ -58,7 +72,7 @@ python eval/run_eval.py --judge-model gpt-4.1-mini    # label new papers with it
 - **Pool bias.** Papers that no system retrieved are never labelled, so Recall@20 is relative to what the evaluated systems found together.
 - **Small query set.** With 32 queries, differences of a few nDCG points are within noise; check the p-values.
 - **The agent returns fewer results.** It usually recommends 5-10 papers, which caps its P@10 and Recall@20. nDCG@10 is the fairest comparison with the pipelines.
-- **Nondeterminism.** The LLM steps are not fully deterministic, and OpenAlex's index changes over time, so reruns won't match exactly.
+- **Nondeterminism.** The LLM steps are not fully deterministic, and OpenAlex's index changes over time, so reruns won't match exactly. The agents vary most: gpt-4o's two runs (`agent-v2`, `agent-v2.run2`) scored nDCG@10 0.604 and 0.549, with 68% of the top 10 in common.
 
 ## Running it
 
@@ -66,6 +80,7 @@ python eval/run_eval.py --judge-model gpt-4.1-mini    # label new papers with it
 python eval/run_eval.py                           # run every system, label new papers, write results.md
 python eval/run_eval.py --systems multi_query+bge-base --queries q01 q02
 python eval/run_eval.py --score-only              # recompute metrics from saved runs and labels
+python eval/run_eval.py --systems agent-v2.run2 --pace 20   # wait 20 s between queries (30k tokens/min keys)
 ```
 
 Runs are saved in `runs/`. Cached LLM analyses, candidate pools and paper texts are saved in `.cache/`, which is not committed.
