@@ -7,7 +7,7 @@ LitFinder is an LLM-powered academic literature search system. Describe what you
 It started as my undergraduate dissertation at the University of Edinburgh (School of Informatics) and has since been extended with LLM tool use:
 
 - **Pipeline search**: OpenAlex **semantic search** finds papers by meaning, **citation expansion** adds the foundational papers they cite, and a **cross-encoder reranker** orders everything by relevance to the request. An LLM reads the request first, with **Structured Outputs** (a Pydantic schema), to pick up constraints such as a date range.
-- **Evaluation**: a 32-query benchmark with graded relevance labels measures every retrieval variant. The current design raises nDCG@10 from 0.55 to 0.95 over the original and needs 2 OpenAlex requests per search instead of 10 ([results](#retrieval-and-evaluation)).
+- **Evaluation**: a 32-query benchmark with graded relevance labels measures every retrieval variant. The current design raises nDCG@10 from 0.55 to 0.95 over the original and needs 2 OpenAlex requests per search instead of 10 ([results](#retrieval-and-evaluation), [technical report](docs/report.md)).
 - **Agent search**: the LLM plans the search itself through **function calling**. It picks from four tools, runs several focused searches in parallel, reads abstracts, and returns a ranked, grounded answer with a reason for each paper.
 - **MCP server**: the same tools are published over the **Model Context Protocol**, so Claude Code, Claude Desktop or any MCP host can search the literature directly.
 - **Provider-agnostic**: works with OpenAI or any OpenAI-compatible API (e.g. Volcano Engine Ark) through `LLM_BASE_URL` / `LLM_MODEL`.
@@ -94,21 +94,21 @@ The earlier keyword design is still available as `RETRIEVAL_STRATEGY=multi_query
 
 - **Queries:** 32 research requests across ML, biology, medicine, materials, climate and social science.
 - **Canonical papers:** 159 foundational papers picked by hand, 4-5 per query.
-- **Relevance labels:** 3,792 graded labels from a `gpt-4.1` judge, covering every paper any system returned in its top 20.
+- **Relevance labels:** 3,952 graded labels from a `gpt-4.1` judge, covering every paper any system returned in its top 20.
 
-Selected systems (full table in [eval/results.md](eval/results.md)):
+Selected systems (full table in [eval/results.md](eval/results.md); the [technical report](docs/report.md) walks through every experiment):
 
 | System | nDCG@10 | Recall@20 | Canonical R@20 | Median latency | OpenAlex requests |
 |---|---|---|---|---|---|
-| Original pipeline (one long query) | 0.550 | 0.098 | 0.006 | 4.5 s | 1 |
-| Keyword queries, no reranker | 0.731 | 0.147 | 0.370 | 5.5 s | 10 |
-| Keyword queries + MiniLM | 0.924 | 0.232 | 0.234 | 6.1 s | 10 |
-| Keyword queries + MiniLM + 10% citation prior (`multi_query`) | 0.893 | 0.218 | 0.391 | 6.1 s | 10 |
-| … + a semantic search channel (`SEMANTIC_RECALL=true`) | 0.898 | 0.225 | 0.397 | 6.4 s | 11 |
-| Semantic search alone, OpenAlex's order | 0.950 | 0.251 | 0.106 | 3.9 s | 1 |
-| Semantic search + MiniLM + 10% citation prior | 0.969 | 0.253 | 0.106 | 4.1 s | 1 |
-| **Semantic search + citation expansion + MiniLM + 20% prior (default)** | **0.947** | **0.251** | **0.341** | **4.9 s** | **2** |
-| Agent search (gpt-4o) | 0.625 | 0.065 | 0.250 | 15.0 s | ~2-3 |
+| Original pipeline (one long query) | 0.550 | 0.096 | 0.006 | 4.5 s | 1 |
+| Keyword queries, no reranker | 0.731 | 0.145 | 0.370 | 5.5 s | 10 |
+| Keyword queries + MiniLM | 0.924 | 0.227 | 0.234 | 6.1 s | 10 |
+| Keyword queries + MiniLM + 10% citation prior (`multi_query`) | 0.893 | 0.215 | 0.391 | 6.1 s | 10 |
+| … + a semantic search channel (`SEMANTIC_RECALL=true`) | 0.898 | 0.221 | 0.397 | 6.4 s | 11 |
+| Semantic search alone, OpenAlex's order | 0.950 | 0.247 | 0.106 | 3.9 s | 1 |
+| Semantic search + MiniLM + 10% citation prior | 0.969 | 0.248 | 0.106 | 4.1 s | 1 |
+| **Semantic search + citation expansion + MiniLM + 20% prior (default)** | **0.947** | **0.247** | **0.341** | **4.9 s** | **2** |
+| Agent search (gpt-4o) | 0.604 | 0.059 | 0.269 | 12.2 s | ≤2 |
 
 What the numbers show:
 
@@ -285,6 +285,7 @@ backend/
 └── .env.example           # Configuration template
 frontend/                  # Static HTML/CSS/JS UI
 eval/                      # Retrieval benchmark: queries, labels, runs, results
+docs/                      # Technical report (EN/ZH) and its figures
 tests/                     # Offline unit tests
 config/nginx.conf          # Example Nginx config for deployment
 .mcp.json                  # Registers the MCP server for Claude Code
