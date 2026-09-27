@@ -4,7 +4,7 @@ Share of the agent's reasons that the paper's title and abstract support (see `f
 
 | System | Reasons checked | Supported | Partially supported | Unsupported | No usable abstract (not checked) |
 |---|---|---|---|---|---|
-| agent-v2.run2 | 125 | 95% | 3% | 2% | 16 |
+| agent-v2.run2 | 127 | 95% | 3% | 2% | 16 |
 | agent-v2@gpt-4o-mini.run2 | 134 | 94% | 3% | 3% | 23 |
 | agent-v2@gpt-4.1-mini.run2 | 116 | 91% | 4% | 4% | 15 |
 

@@ -216,7 +216,7 @@ Whether the paper fits the request is not judged here; nDCG already measures tha
 
 | Agent model | Reasons checked | Supported | Partially supported | Unsupported | No usable abstract |
 |---|---|---|---|---|---|
-| gpt-4o | 125 | 95% | 3% | 2% | 16 |
+| gpt-4o | 127 | 95% | 3% | 2% | 16 |
 | gpt-4o-mini | 134 | 94% | 3% | 3% | 23 |
 | gpt-4.1-mini | 116 | 91% | 4% | 4% | 15 |
 
