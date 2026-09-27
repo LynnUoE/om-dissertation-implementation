@@ -94,3 +94,9 @@ def test_query_processor_reports_llm_errors():
     fake = FakeLLM([completion(content='{"research_areas": "not a list"}')])
     result = make_processor(fake).process_query("gnn")
     assert result["research_areas"] == [] and "error" in result
+
+
+def test_llm_client_times_out_and_retries():
+    client = llm.create_llm_client("test-key")
+    assert client.max_retries == 6
+    assert client.timeout == llm.LLM_TIMEOUT == 60.0

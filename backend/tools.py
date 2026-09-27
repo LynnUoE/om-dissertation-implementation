@@ -17,7 +17,7 @@ import openai
 from pydantic import BaseModel, Field, ValidationError
 
 from openalex_client import OpenAlexClient, reconstruct_abstract
-from retrieval import Reranker, rerank, title_key
+from retrieval import Reranker, rerank, title_abstract_filter, title_key
 
 MAX_LIMIT = 25
 RERANK_POOL = 50  # With a reranker, relevance searches fetch this many results and keep the best `limit`
@@ -40,10 +40,12 @@ _AUTHOR_ID = re.compile(r"^(https://openalex\.org/)?A\d+$")
 class SearchPapers(BaseModel):
     """Search scholarly papers in OpenAlex by keywords. Use a focused query of 2-6 key terms; for multi-part questions run several narrower searches instead of one long query."""
     query: str = Field(description="Keyword query, e.g. 'graph neural network molecular property prediction'")
-    from_year: Optional[int] = Field(description="Earliest publication year, or null for no lower bound")
-    to_year: Optional[int] = Field(description="Latest publication year, or null for no upper bound")
-    min_citations: Optional[int] = Field(description="Only papers with at least this many citations, or null")
-    sort: Literal["relevance", "citations", "recent"] = Field(description="Result order")
+    from_year: Optional[int] = Field(description="Earliest publication year. Null unless the request asks for a period")
+    to_year: Optional[int] = Field(description="Latest publication year. Null unless the request asks for a period")
+    min_citations: Optional[int] = Field(description="Only papers with at least this many citations. Null unless the request asks for highly cited work")
+    sort: Literal["relevance", "citations", "recent"] = Field(
+        description="'relevance' (best matches; use it unless the request asks otherwise), 'citations' (most cited) "
+                    "or 'recent' (newest). 'citations' and 'recent' only match titles and abstracts")
     limit: int = Field(description=f"Number of papers to return, 1-{MAX_LIMIT}")
 
 
@@ -175,13 +177,15 @@ class ToolExecutor:
 
         limit = self._clamp(p.limit)
         use_reranker = self.reranker is not None and p.sort == "relevance"
+        # Full-text matches sorted by citations or date are mostly papers that merely mention the terms
+        kwargs = {"query": query} if p.sort == "relevance" else {"query": "", "filter_string": title_abstract_filter(query)}
         response = self.client.search_works(
-            query=query,
             from_year=p.from_year,
             to_year=p.to_year,
             min_citations=p.min_citations,
             sort=PAPER_SORTS[p.sort],
             per_page=RERANK_POOL if use_reranker else limit,
+            **kwargs,
         )
         if response.error:
             raise ToolError(f"OpenAlex search failed: {response.error}")

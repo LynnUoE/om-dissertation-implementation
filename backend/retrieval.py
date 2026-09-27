@@ -106,7 +106,7 @@ def recall(
             return client.search_works(query=query, from_year=from_year, to_year=to_year,
                                        per_page=SEMANTIC_RESULTS, semantic=True)
         if field == "title_abstract":
-            kwargs = {"query": "", "filter_string": f"title_and_abstract.search:{_filter_value(query)}"}
+            kwargs = {"query": "", "filter_string": title_abstract_filter(query)}
         else:
             kwargs = {"query": query}
         return client.search_works(from_year=from_year, to_year=to_year, min_citations=min_citations,
@@ -194,9 +194,14 @@ def expand_by_citations(
     return sorted(new, key=lambda w: order.get(w.get("id"), len(order)))
 
 
-def _filter_value(query: str) -> str:
-    """OpenAlex filter values can't contain the filter syntax characters , | :"""
-    return " ".join(re.sub(r"[,|:]", " ", query).split())
+def title_abstract_filter(query: str) -> str:
+    """
+    OpenAlex filter that keyword-matches titles and abstracts only. Use it for
+    searches sorted by citations or date: a full-text search sorted that way
+    mostly returns papers that merely mention the terms somewhere in the text.
+    """
+    # Filter values can't contain the filter syntax characters , | :
+    return "title_and_abstract.search:" + " ".join(re.sub(r"[,|:]", " ", query).split())
 
 
 # ---------------------------------------------------------------------------
