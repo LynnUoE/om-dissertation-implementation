@@ -34,6 +34,10 @@ BGE_M3 = "cross-encoder:BAAI/bge-reranker-v2-m3"
 EMBEDDING = "embedding:text-embedding-3-small"
 # (sort, searched field) pairs of the first recall version
 RECALL_V1 = (("relevance_score:desc", "fulltext"), ("cited_by_count:desc", "fulltext"))
+DEFAULT = "semantic+minilm+cite0.2+expand"  # The production configuration
+DEFAULT_CONFIG = {"kind": "pipeline", "recall": "semantic", "reranker": MINILM, "citation_weight": 0.2, "expand": True}
+# US$ per 1M input / output tokens (OpenAI list prices, September 2026)
+PRICES = {"gpt-4o": (2.50, 10.00), "gpt-4.1-mini": (0.40, 1.60), "gpt-4o-mini": (0.15, 0.60)}
 
 SYSTEMS: Dict[str, Dict] = {
     "single_query": {"kind": "pipeline", "strategy": "single_query",
@@ -83,7 +87,14 @@ SYSTEMS: Dict[str, Dict] = {
     "semantic+minilm+cite0.2+expand": {"kind": "pipeline", "recall": "semantic", "reranker": MINILM,
                                        "citation_weight": 0.2, "expand": True,
                                        "about": "Semantic search + citation expansion, MiniLM, 20% citation prior"},
+    # The default pipeline and the agent with cheaper LLMs (the default model is gpt-4o)
+    "semantic+minilm+cite0.2+expand@gpt-4.1-mini": {**DEFAULT_CONFIG, "model": "gpt-4.1-mini",
+                                                    "about": "Default pipeline, query analysis by gpt-4.1-mini"},
+    "semantic+minilm+cite0.2+expand@gpt-4o-mini": {**DEFAULT_CONFIG, "model": "gpt-4o-mini",
+                                                   "about": "Default pipeline, query analysis by gpt-4o-mini"},
     "agent": {"kind": "agent", "about": "Function-calling agent (returns up to ~10 papers)"},
+    "agent@gpt-4.1-mini": {"kind": "agent", "model": "gpt-4.1-mini", "about": "Agent with gpt-4.1-mini"},
+    "agent@gpt-4o-mini": {"kind": "agent", "model": "gpt-4o-mini", "about": "Agent with gpt-4o-mini"},
     "agent+rerank": {"kind": "agent", "reranker": MINILM,
                      "about": "Agent whose search_papers tool reranks with the MiniLM cross-encoder"},
 }
@@ -112,6 +123,7 @@ class Runner:
         self._watch_openalex_errors()
         self.llm = self.searcher.query_processor.client
         self.model = Config.LLM_MODEL
+        self._record_llm_usage()
         self.agent_cls, self.max_steps = ResearchAgent, Config.AGENT_MAX_STEPS
         self._rerankers = {}
         self.docs_path = os.path.join(CACHE_DIR, "docs.json")
@@ -133,6 +145,21 @@ class Runner:
                 self.openalex_errors.append(response.error)
             return response
         client.search_works = watched
+
+    def _record_llm_usage(self) -> None:
+        """Sum the token usage of every chat completion (the query processor doesn't report it)."""
+        completions = self.llm.chat.completions
+        create = completions.create
+        self.llm_usage = {"prompt_tokens": 0, "completion_tokens": 0, "calls": 0}
+
+        def recorded(*args, **kwargs):
+            response = create(*args, **kwargs)
+            if getattr(response, "usage", None):
+                self.llm_usage["prompt_tokens"] += response.usage.prompt_tokens
+                self.llm_usage["completion_tokens"] += response.usage.completion_tokens
+                self.llm_usage["calls"] += 1
+            return response
+        completions.create = recorded
 
     def _check_openalex(self, qid: str) -> None:
         errors, self.openalex_errors[:] = list(self.openalex_errors), []
@@ -159,26 +186,36 @@ class Runner:
         json.dump(value, open(path, "w"))
         return value
 
-    def analysis(self, q: Dict) -> Dict:
+    def analysis(self, q: Dict, model: Optional[str] = None) -> Dict:
+        """LLM query analysis, cached per model (the default model's cache is "analysis")."""
+        model = model or self.model
+        processor = self.searcher.query_processor
+
         def compute():
-            start = time.time()
-            structured = self.searcher.query_processor.process_query(q["query"])
+            processor.model, before = model, dict(self.llm_usage)
+            try:
+                start = time.time()
+                structured = processor.process_query(q["query"])
+            finally:
+                processor.model = self.model
             if structured.get("error"):
-                raise RuntimeError(f"{q['id']}: query analysis failed: {structured['error']}")
-            return {"structured": structured, "seconds": time.time() - start}
-        return self._cached("analysis", q["id"], compute)
+                raise RuntimeError(f"{q['id']}: query analysis failed ({model}): {structured['error']}")
+            usage = {k: self.llm_usage[k] - before[k] for k in ("prompt_tokens", "completion_tokens")}
+            return {"structured": structured, "seconds": time.time() - start, "usage": usage}
+        return self._cached("analysis" if model == self.model else f"analysis-{model}", q["id"], compute)
 
     def semantic(self, q: Dict, structured: Dict) -> Dict:
-        """OpenAlex semantic search for the whole request (cached)."""
+        """OpenAlex semantic search for the whole request, cached per query and year range."""
+        from_year, to_year = self.searcher.resolve_year_range(structured)
+
         def compute():
             start = time.time()
-            from_year, to_year = self.searcher.resolve_year_range(structured)
             response = self.searcher.openalex_client.search_works(
                 query=q["query"], from_year=from_year, to_year=to_year, per_page=50, semantic=True)
             self._check_openalex(q["id"])
             return {"works": [{f: w.get(f) for f in WORK_FIELDS} for w in response.data.get("results", [])],
                     "seconds": time.time() - start}
-        return self._cached("semantic", q["id"], compute)
+        return self._cached("semantic", f"{q['id']}_{from_year or ''}-{to_year or ''}", compute)
 
     def candidates(self, q: Dict, structured: Dict, version: str) -> Dict:
         """
@@ -209,7 +246,7 @@ class Runner:
     # -- systems -------------------------------------------------------------
 
     def run_pipeline(self, config: Dict, q: Dict) -> Dict:
-        analysis = self.analysis(q)
+        analysis = self.analysis(q, config.get("model"))
         structured = analysis["structured"]
         if config.get("strategy") == "single_query":
             start = time.time()
@@ -229,11 +266,14 @@ class Runner:
             n, retrieval_s = len(pool["works"]), pool["seconds"] + time.time() - start
         papers = [{"title": r.title, "year": (r.publication_date or "")[:4], "abstract": r.abstract}
                   for r in results]
-        return {"papers": papers, "latency_s": analysis["seconds"] + retrieval_s,
-                "llm_calls": 1, "llm_tokens": None, "candidates": n}
+        usage = analysis.get("usage") or {}
+        return {"papers": papers, "latency_s": analysis["seconds"] + retrieval_s, "llm_calls": 1,
+                "llm_tokens": sum(usage.values()) if usage else None,
+                "prompt_tokens": usage.get("prompt_tokens"), "completion_tokens": usage.get("completion_tokens"),
+                "model": config.get("model", self.model), "candidates": n}
 
     def run_agent(self, config: Dict, q: Dict) -> Dict:
-        agent = self.agent_cls(self.llm, self.model, self.searcher.openalex_client,
+        agent = self.agent_cls(self.llm, config.get("model", self.model), self.searcher.openalex_client,
                                self.searcher.format_publication, max_steps=self.max_steps,
                                reranker=self.reranker(config.get("reranker")))
         result = agent.run(q["query"])
@@ -244,6 +284,8 @@ class Runner:
                   for p in result["results"]]
         return {"papers": papers, "latency_s": result["metadata"]["processing_time"],
                 "llm_calls": usage["llm_calls"], "llm_tokens": usage["prompt_tokens"] + usage["completion_tokens"],
+                "prompt_tokens": usage["prompt_tokens"], "completion_tokens": usage["completion_tokens"],
+                "model": config.get("model", self.model),
                 "tool_calls": len(result["agent"]["trace"]), "dropped_ids": len(result["agent"]["dropped_ids"])}
 
     def run(self, system: str, queries: List[Dict]) -> None:
@@ -319,6 +361,14 @@ class Runner:
 # Scoring
 # ---------------------------------------------------------------------------
 
+def llm_cost(run: Dict) -> Optional[float]:
+    """US$ of LLM usage for one run, at PRICES (None when tokens weren't recorded)."""
+    price = PRICES.get(run.get("model"))
+    if price is None or run.get("prompt_tokens") is None:
+        return None
+    return (run["prompt_tokens"] * price[0] + run["completion_tokens"] * price[1]) / 1e6
+
+
 def fmt(value: Optional[float], digits: int = 3) -> str:
     return "–" if value is None else f"{value:.{digits}f}"
 
@@ -350,10 +400,11 @@ def score(queries: List[Dict], systems: List[str]) -> str:
                 "latency": run["latency_s"],
                 "tokens": run.get("llm_tokens"),
                 "calls": run.get("llm_calls"),
+                "cost": llm_cost(run),
             }
         per_query[system] = stats
         rows.append((system, len(runs), unjudged, {m: mean(s[m] for s in stats.values())
-                                                   for m in ("ndcg10", "p10", "r20", "canon20", "tokens", "calls")},
+                                                   for m in ("ndcg10", "p10", "r20", "canon20", "tokens", "calls", "cost")},
                      median(s["latency"] for s in stats.values())))
 
     n_labels = sum(len(v) for v in qrels.values())
@@ -363,8 +414,8 @@ def score(queries: List[Dict], systems: List[str]) -> str:
         f"Generated by `eval/run_eval.py` on {date.today().isoformat()}: {len(qids)} queries, "
         f"{n_labels} graded (query, paper) labels.",
         "",
-        "| System | nDCG@10 | P@10 | Recall@20 | Canonical R@20 | Median latency (s) | LLM calls | LLM tokens | p (nDCG@10 vs baseline) |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| System | nDCG@10 | P@10 | Recall@20 | Canonical R@20 | Median latency (s) | LLM calls | LLM tokens | LLM US$/query | p (nDCG@10 vs baseline) |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     base = per_query.get(BASELINE)
     for system, n, unjudged, m, lat in rows:
@@ -376,7 +427,7 @@ def score(queries: List[Dict], systems: List[str]) -> str:
         tokens = "–" if m["tokens"] is None else f"{m['tokens']:,.0f}"
         name = system if n == len(qids) else f"{system} ({n} queries)"
         lines.append(f"| {name} | {fmt(m['ndcg10'])} | {fmt(m['p10'])} | {fmt(m['r20'])} | {fmt(m['canon20'])} "
-                     f"| {fmt(lat, 1)} | {fmt(m['calls'], 1)} | {tokens} | {p} |")
+                     f"| {fmt(lat, 1)} | {fmt(m['calls'], 1)} | {tokens} | {fmt(m['cost'], 5)} | {p} |")
         if unjudged:
             lines.append(f"<!-- {system}: {unjudged} unjudged results counted as not relevant -->")
 
