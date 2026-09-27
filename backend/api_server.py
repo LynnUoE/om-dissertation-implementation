@@ -26,6 +26,9 @@ class Config:
     LLM_API_KEY = os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
     LLM_BASE_URL = os.getenv("LLM_BASE_URL") or None
     LLM_MODEL = os.getenv("LLM_MODEL", DEFAULT_LLM_MODEL)
+    # Query analysis for pipeline search only extracts constraints such as a date range; on
+    # eval/ gpt-4o-mini matched gpt-4o at about 1/16 of the cost. Other providers keep LLM_MODEL.
+    QUERY_LLM_MODEL = os.getenv("QUERY_LLM_MODEL") or (LLM_MODEL if LLM_BASE_URL else "gpt-4o-mini")
     AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))  # Max LLM calls per agent search
     # Pipeline search: semantic (semantic search + citation expansion + rerank), multi_query
     # (focused keyword searches + rerank) or single_query (original baseline); see eval/results.md
@@ -89,6 +92,7 @@ def get_literature_searcher() -> LiteratureSearcher:
             Config.OPENALEX_API_KEY,
             llm_model=Config.LLM_MODEL,
             llm_base_url=Config.LLM_BASE_URL,
+            query_llm_model=Config.QUERY_LLM_MODEL,
             retrieval_strategy=Config.RETRIEVAL_STRATEGY,
             reranker=Config.RERANKER,
             citation_weight=Config.RERANK_CITATION_WEIGHT,

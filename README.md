@@ -59,7 +59,8 @@ Set these in `backend/.env`:
 | Variable | Default | Purpose |
 |---|---|---|
 | `OPENAI_API_KEY` | required | LLM API key (used unless `LLM_API_KEY` is set) |
-| `LLM_MODEL` | `gpt-4o` | Chat model, or a provider's model/endpoint ID. Must support tool calling and `temperature` |
+| `LLM_MODEL` | `gpt-4o` | Chat model for agent search and reading notes, or a provider's model/endpoint ID. Must support tool calling and `temperature` |
+| `QUERY_LLM_MODEL` | `gpt-4o-mini` | Model for pipeline query analysis (on other providers, defaults to `LLM_MODEL`) |
 | `LLM_BASE_URL` | OpenAI | Base URL of an OpenAI-compatible provider, e.g. `https://ark.cn-beijing.volces.com/api/v3` |
 | `LLM_API_KEY` | `OPENAI_API_KEY` | Key for the provider at `LLM_BASE_URL` |
 | `AGENT_MAX_STEPS` | `6` | Max LLM calls per agent search |
@@ -83,7 +84,7 @@ The original pipeline joined every term the LLM extracted into one long query (o
 2. **Citation expansion.** Foundational papers are rarely among those matches, but the matches cite them. Papers that several of the best matches cite are fetched in one cheap request (the snowballing a researcher would do by hand).
 3. **Rerank.** A cross-encoder (`ms-marco-MiniLM-L-6-v2`, 22M parameters, runs locally) reads each candidate's title and abstract together with the request. The final score is 80% this relevance score and 20% a log-scaled citation prior.
 
-The LLM still reads the request first, to pick up constraints such as "since 2023". A search costs 2 OpenAlex requests, about US$0.0011, so the free daily budget covers about 900 searches.
+The LLM (`gpt-4o-mini` by default) still reads the request first, to pick up constraints such as "since 2023". A search costs 2 OpenAlex requests, about US$0.0011, so the free daily budget covers about 900 searches, plus about US$0.0003 of LLM usage.
 
 The earlier keyword design is still available as `RETRIEVAL_STRATEGY=multi_query`: the LLM writes 3-5 focused queries, each runs as a full-text search by relevance and a title/abstract search by citations, and the ~180 merged candidates are reranked the same way. It costs 10 requests per search.
 
@@ -118,6 +119,16 @@ What the numbers show:
 - **A small cross-encoder is enough.** MiniLM (22M) scores the same as bge-reranker-v2-m3 (568M, p = 0.27) at a third of the latency. OpenAI embeddings score about the same but cost an API call per search.
 - **Not every idea helped.** Citation expansion does nothing for the keyword pipeline, whose candidates already include the classics. Reranking the agent's tool results raised its nDCG (0.63 → 0.71, p = 0.03) but cut its canonical recall from 0.25 to 0.15, so it's off by default.
 - **The agent scores lower on these metrics by design.** It recommends about 5-6 papers after about 2 tool calls, while the metrics reward a full top 10/20. Its strengths are explanations, researchers and multi-part questions, which these metrics don't measure.
+
+**Cheaper LLMs.** In the default pipeline the LLM only extracts constraints such as a date range, so a small model is enough. All three models below read "since 2023" correctly and produce the same retrieval, so the small differences are noise:
+
+| Query analysis model | nDCG@10 | Canonical R@20 | LLM cost per search |
+|---|---|---|---|
+| gpt-4o | 0.947 | 0.341 | ~US$0.0046 (estimated from the same prompt) |
+| gpt-4.1-mini | 0.949 | 0.347 | US$0.00077 |
+| **gpt-4o-mini (default)** | **0.949** | **0.347** | **US$0.00028** |
+
+The agent is a different story: it plans every search, so model quality matters (see `eval/results.md`).
 
 Run it with `python eval/run_eval.py`.
 

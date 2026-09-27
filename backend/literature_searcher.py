@@ -57,6 +57,7 @@ class LiteratureSearcher:
         cache_duration: int = 24,  # Cache duration in hours
         llm_model: str = DEFAULT_LLM_MODEL,
         llm_base_url: Optional[str] = None,
+        query_llm_model: Optional[str] = None,
         retrieval_strategy: str = 'semantic',
         reranker: Optional[Reranker] = None,
         citation_weight: float = 0.0,
@@ -74,6 +75,7 @@ class LiteratureSearcher:
             cache_duration: Duration in hours to cache results
             llm_model: Chat model name (or provider endpoint ID)
             llm_base_url: Optional OpenAI-compatible API base URL
+            query_llm_model: Model for query analysis; defaults to llm_model
             retrieval_strategy: 'semantic' (OpenAlex semantic search on the whole request,
                 usually with citation expansion, then rerank), 'multi_query' (several
                 focused keyword searches, then rerank) or 'single_query' (the original
@@ -90,7 +92,7 @@ class LiteratureSearcher:
         if retrieval_strategy not in RETRIEVAL_STRATEGIES:
             raise ValueError(f"retrieval_strategy must be one of {RETRIEVAL_STRATEGIES}")
         # Initialize components
-        self.query_processor = create_query_processor(openai_api_key, llm_model, llm_base_url)
+        self.query_processor = create_query_processor(openai_api_key, query_llm_model or llm_model, llm_base_url)
         self.openalex_client = create_client(email_for_openalex, openalex_api_key)
         self.research_analyzer = create_analyzer(openai_api_key, llm_model, llm_base_url)
         self.cache_duration = cache_duration
@@ -1291,6 +1293,7 @@ def create_literature_searcher(
     openalex_api_key: Optional[str] = None,
     llm_model: str = DEFAULT_LLM_MODEL,
     llm_base_url: Optional[str] = None,
+    query_llm_model: Optional[str] = None,
     retrieval_strategy: str = 'semantic',
     reranker: Optional[str] = None,
     citation_weight: Optional[float] = None,
@@ -1309,7 +1312,7 @@ def create_literature_searcher(
     if citation_expansion is None:
         citation_expansion = defaults.get('citation_expansion', False)
     searcher = LiteratureSearcher(openai_api_key, email_for_openalex, openalex_api_key,
-                                  llm_model=llm_model, llm_base_url=llm_base_url,
+                                  llm_model=llm_model, llm_base_url=llm_base_url, query_llm_model=query_llm_model,
                                   retrieval_strategy=retrieval_strategy, citation_weight=citation_weight,
                                   citation_expansion=citation_expansion, semantic_recall=semantic_recall)
     # The embedding reranker reuses the LLM provider's client

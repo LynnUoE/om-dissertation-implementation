@@ -410,3 +410,11 @@ def test_factory_uses_strategy_defaults(monkeypatch):
     assert semantic.citation_expansion is True
     keyword = create_literature_searcher("k", "e@example.com", retrieval_strategy="multi_query", citation_weight=0.3)
     assert keyword.citation_weight == 0.3 and keyword.citation_expansion is False
+
+
+def test_query_analysis_can_use_its_own_model(monkeypatch):
+    from literature_searcher import create_literature_searcher
+    monkeypatch.setattr("literature_searcher.create_reranker", lambda spec, llm_client=None: None)
+    s = create_literature_searcher("k", "e@example.com", llm_model="gpt-4o", query_llm_model="gpt-4o-mini")
+    assert s.query_processor.model == "gpt-4o-mini" and s.research_analyzer.model == "gpt-4o"
+    assert create_literature_searcher("k", "e@example.com", llm_model="gpt-4o").query_processor.model == "gpt-4o"
