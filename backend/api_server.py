@@ -29,6 +29,9 @@ class Config:
     # Query analysis for pipeline search only extracts constraints such as a date range; on
     # eval/ gpt-4o-mini matched gpt-4o at about 1/16 of the cost. Other providers keep LLM_MODEL.
     QUERY_LLM_MODEL = os.getenv("QUERY_LLM_MODEL") or (LLM_MODEL if LLM_BASE_URL else "gpt-4o-mini")
+    # Agent search: on eval/, gpt-4o-mini matched gpt-4o on relevance (the gap is smaller than
+    # the run-to-run noise) and on reason faithfulness, at about 1/11 of the cost
+    AGENT_LLM_MODEL = os.getenv("AGENT_LLM_MODEL") or (LLM_MODEL if LLM_BASE_URL else "gpt-4o-mini")
     AGENT_MAX_STEPS = int(os.getenv("AGENT_MAX_STEPS", "6"))  # Max LLM calls per agent search
     # Pipeline search: semantic (semantic search + citation expansion + rerank), multi_query
     # (focused keyword searches + rerank) or single_query (original baseline); see eval/results.md
@@ -110,7 +113,7 @@ def get_research_agent() -> ResearchAgent:
         searcher = get_literature_searcher()
         research_agent = ResearchAgent(
             llm_client=searcher.query_processor.client,
-            model=Config.LLM_MODEL,
+            model=Config.AGENT_LLM_MODEL,
             openalex_client=searcher.openalex_client,
             format_paper=searcher.format_publication,
             max_steps=Config.AGENT_MAX_STEPS,

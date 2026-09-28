@@ -59,8 +59,9 @@ Set these in `backend/.env`:
 | Variable | Default | Purpose |
 |---|---|---|
 | `OPENAI_API_KEY` | required | LLM API key (used unless `LLM_API_KEY` is set) |
-| `LLM_MODEL` | `gpt-4o` | Chat model for agent search and reading notes, or a provider's model/endpoint ID. Must support tool calling and `temperature` |
+| `LLM_MODEL` | `gpt-4o` | Chat model for reading notes, or a provider's model/endpoint ID. Must support tool calling and `temperature` |
 | `QUERY_LLM_MODEL` | `gpt-4o-mini` | Model for pipeline query analysis (on other providers, defaults to `LLM_MODEL`) |
+| `AGENT_LLM_MODEL` | `gpt-4o-mini` | Model for agent search (on other providers, defaults to `LLM_MODEL`) |
 | `LLM_BASE_URL` | OpenAI | Base URL of an OpenAI-compatible provider, e.g. `https://ark.cn-beijing.volces.com/api/v3` |
 | `LLM_API_KEY` | `OPENAI_API_KEY` | Key for the provider at `LLM_BASE_URL` |
 | `AGENT_MAX_STEPS` | `6` | Max LLM calls per agent search |
@@ -94,21 +95,21 @@ The earlier keyword design is still available as `RETRIEVAL_STRATEGY=multi_query
 
 - **Queries:** 32 research requests across ML, biology, medicine, materials, climate and social science.
 - **Canonical papers:** 159 foundational papers picked by hand, 4-5 per query.
-- **Relevance labels:** 3,952 graded labels from a `gpt-4.1` judge, covering every paper any system returned in its top 20.
+- **Relevance labels:** 3,972 graded labels from a `gpt-4.1` judge, covering every paper any system returned in its top 20.
 
 Selected systems (full table in [eval/results.md](eval/results.md); the [technical report](docs/report.md) walks through every experiment):
 
 | System | nDCG@10 | Recall@20 | Canonical R@20 | Median latency | OpenAlex requests |
 |---|---|---|---|---|---|
 | Original pipeline (one long query) | 0.550 | 0.096 | 0.006 | 4.5 s | 1 |
-| Keyword queries, no reranker | 0.731 | 0.145 | 0.370 | 5.5 s | 10 |
-| Keyword queries + MiniLM | 0.924 | 0.227 | 0.234 | 6.1 s | 10 |
-| Keyword queries + MiniLM + 10% citation prior (`multi_query`) | 0.893 | 0.215 | 0.391 | 6.1 s | 10 |
-| … + a semantic search channel (`SEMANTIC_RECALL=true`) | 0.898 | 0.221 | 0.397 | 6.4 s | 11 |
-| Semantic search alone, OpenAlex's order | 0.950 | 0.247 | 0.106 | 3.9 s | 1 |
-| Semantic search + MiniLM + 10% citation prior | 0.969 | 0.248 | 0.106 | 4.1 s | 1 |
-| **Semantic search + citation expansion + MiniLM + 20% prior (default)** | **0.947** | **0.247** | **0.341** | **4.9 s** | **2** |
-| Agent search (gpt-4o) | 0.604 | 0.059 | 0.269 | 12.2 s | ≤2 |
+| Keyword queries, no reranker | 0.731 | 0.144 | 0.370 | 5.5 s | 10 |
+| Keyword queries + MiniLM | 0.924 | 0.226 | 0.234 | 6.1 s | 10 |
+| Keyword queries + MiniLM + 10% citation prior (`multi_query`) | 0.893 | 0.213 | 0.391 | 6.1 s | 10 |
+| … + a semantic search channel (`SEMANTIC_RECALL=true`) | 0.898 | 0.220 | 0.397 | 6.4 s | 11 |
+| Semantic search alone, OpenAlex's order | 0.950 | 0.245 | 0.106 | 3.9 s | 1 |
+| Semantic search + MiniLM + 10% citation prior | 0.969 | 0.247 | 0.106 | 4.1 s | 1 |
+| **Semantic search + citation expansion + MiniLM + 20% prior (default)** | **0.947** | **0.245** | **0.341** | **4.9 s** | **2** |
+| Agent search (gpt-4o-mini, default) | 0.557 | 0.052 | 0.269 | 6.3 s | ≤5 |
 
 What the numbers show:
 
@@ -132,11 +133,19 @@ The agent is a different story: it plans every search, so model quality matters.
 
 | Agent model | nDCG@10 before → after the fix | Canonical R@20 after | Cost per search | Latency |
 |---|---|---|---|---|
-| gpt-4o (default) | 0.625 → 0.604 (n.s.) | 0.269 | US$0.027 | 12.2 s |
+| gpt-4o | 0.625 → 0.604 (n.s.) | 0.269 | US$0.027 | 12.2 s |
 | gpt-4.1-mini | 0.515 → 0.532 (n.s.) | 0.206 | US$0.0050 | 5.6 s |
-| gpt-4o-mini | 0.200 → 0.557 (p < 0.001) | 0.269 | US$0.0021 | 6.3 s |
+| **gpt-4o-mini (default)** | 0.200 → 0.557 (p < 0.001) | 0.269 | US$0.0021 | 6.3 s |
 
-After the fix, gpt-4o-mini is close to gpt-4o (nDCG@10 0.557 vs 0.604, p = 0.085; the same canonical recall) at 1/13 of the cost and half the latency, so `LLM_MODEL=gpt-4o-mini` is a reasonable budget setting. The default stays gpt-4o because the quality of the agent's reasons isn't measured yet. gpt-4.1-mini is significantly worse than gpt-4o (p = 0.011).
+After the fix, gpt-4o-mini is close to gpt-4o (nDCG@10 0.557 vs 0.604, p = 0.085). A second run of each agent showed that this gap is within run-to-run noise: gpt-4o itself scored 0.549 the second time, and over both runs the two models average 0.577 and 0.567 (p = 0.62). The second run also saved each recommendation's reason, and gpt-4.1 checked every reason against the paper's abstract ([eval/faithfulness.py](eval/faithfulness.py)):
+
+| Agent model | Reasons fully supported by the abstract | Unsupported | LLM cost per search |
+|---|---|---|---|
+| gpt-4o | 95% | 2% | US$0.024 |
+| gpt-4.1-mini | 91% | 4% | US$0.0055 |
+| **gpt-4o-mini (default)** | **94%** | **3%** | **US$0.0021** |
+
+So the agent now uses gpt-4o-mini by default (`AGENT_LLM_MODEL`), at 1/11 of the cost and half the latency. The most serious error, which all three models made on the same paper, is repeating a claim that the abstract quotes and then refutes. gpt-4.1-mini is significantly worse than gpt-4o (p = 0.035 over both runs). See the [report](docs/report.md#37-are-the-agents-reasons-faithful) for details.
 
 Run it with `python eval/run_eval.py`.
 
@@ -230,7 +239,7 @@ claude mcp add litfinder -s user -- /absolute/path/to/.venv/bin/python /absolute
 | | Function calling (`/api/agent-search`) | MCP (`mcp_server.py`) |
 |---|---|---|
 | Who runs the loop | This app: it sends tool schemas, executes calls, feeds results back | The MCP host (e.g. Claude Code) |
-| Who chooses the model | This app (`LLM_MODEL`) | The host |
+| Who chooses the model | This app (`AGENT_LLM_MODEL`) | The host |
 | What this project provides | Tools and the orchestration loop | Tools only, discoverable by any MCP host |
 | Transport | In-process | stdio or Streamable HTTP (JSON-RPC 2.0) |
 

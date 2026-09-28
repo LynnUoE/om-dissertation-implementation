@@ -8,7 +8,7 @@ never re-judged, so adding a new system only judges the papers it newly
 retrieves (incremental pooling).
 """
 from concurrent.futures import ThreadPoolExecutor
-from typing import Dict, List, Literal, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -57,17 +57,21 @@ def judge_one(client, model: str, query: str, doc: Dict) -> Judgement:
     )
 
 
-def judge_many(client, model: str, items: List[Dict], workers: int = 3) -> List[Optional[Judgement]]:
+def judge_many(client, model: str, items: List[Dict], workers: int = 3,
+               judge_fn: Optional[Callable[[Any, str, Dict], Any]] = None) -> List[Optional[Any]]:
     """
     items: [{"query": ..., "doc": {...}}]. Returns one Judgement per item, or
     None when the call failed (the pair stays unjudged and is retried next run).
     Few workers and patient retries, so low tokens-per-minute limits are respected.
+    judge_fn(client, model, item) replaces the relevance judgement, e.g. for
+    other LLM checks that need the same throttling.
     """
     client = client.with_options(max_retries=10)
+    judge_fn = judge_fn or (lambda c, m, item: judge_one(c, m, item["query"], item["doc"]))
 
     def run(item):
         try:
-            return judge_one(client, model, item["query"], item["doc"])
+            return judge_fn(client, model, item)
         except Exception as e:  # noqa: BLE001 - keep judging the rest
             print(f"  judge failed for '{item['doc'].get('title', '')[:60]}': {e}")
             return None

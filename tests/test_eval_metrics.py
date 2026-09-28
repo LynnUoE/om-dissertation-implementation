@@ -39,3 +39,12 @@ def test_canonical_recall_matches_any_title_variant():
 def test_randomization_test():
     assert paired_randomization_test([0.5] * 10, [0.5] * 10) == 1.0
     assert paired_randomization_test([0.9] * 12, [0.1] * 12) < 0.001
+
+
+def test_faithfulness_summary():
+    from faithfulness import summarize
+    verdicts = [{"verdict": "supported"}] * 3 + [{"verdict": "unsupported"}]
+    s = summarize(verdicts, no_abstract=2)
+    assert s["checked"] == 4 and s["no_abstract"] == 2
+    assert s["supported"] == 0.75 and s["unsupported"] == 0.25 and s["partially_supported"] == 0
+    assert summarize([], 1)["supported"] is None

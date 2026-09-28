@@ -100,6 +100,12 @@ SYSTEMS: Dict[str, Dict] = {
     "agent-v2": {"kind": "agent", "about": "Agent with the fixed search tool, gpt-4o"},
     "agent-v2@gpt-4.1-mini": {"kind": "agent", "model": "gpt-4.1-mini", "about": "Agent with the fixed search tool, gpt-4.1-mini"},
     "agent-v2@gpt-4o-mini": {"kind": "agent", "model": "gpt-4o-mini", "about": "Agent with the fixed search tool, gpt-4o-mini"},
+    # Second runs of the fixed agent, which also save each paper's reason (see faithfulness.py)
+    "agent-v2.run2": {"kind": "agent", "about": "Second run of agent-v2 (gpt-4o), with reasons saved"},
+    "agent-v2@gpt-4.1-mini.run2": {"kind": "agent", "model": "gpt-4.1-mini",
+                                   "about": "Second run of agent-v2@gpt-4.1-mini, with reasons saved"},
+    "agent-v2@gpt-4o-mini.run2": {"kind": "agent", "model": "gpt-4o-mini",
+                                  "about": "Second run of agent-v2@gpt-4o-mini, with reasons saved"},
     "agent+rerank": {"kind": "agent", "reranker": MINILM,
                      "about": "Agent whose search_papers tool reranks with the MiniLM cross-encoder"},
 }
@@ -113,13 +119,14 @@ WORK_FIELDS = ("id", "doi", "title", "publication_year", "publication_date", "ci
 # ---------------------------------------------------------------------------
 
 class Runner:
-    def __init__(self, force: bool = False):
+    def __init__(self, force: bool = False, pace: float = 0.0):
         load_env()
         from agent import ResearchAgent
         from api_server import Config
         from literature_searcher import create_literature_searcher
 
         self.force = force
+        self.pace = pace  # Seconds to wait between queries (low tokens-per-minute limits)
         self.searcher = create_literature_searcher(
             Config.LLM_API_KEY, Config.RESEARCHER_EMAIL, Config.OPENALEX_API_KEY,
             llm_model=Config.LLM_MODEL, llm_base_url=Config.LLM_BASE_URL)
@@ -300,6 +307,8 @@ class Runner:
         for q in queries:
             if q["id"] in rows and not self.force:
                 continue
+            if self.pace:
+                time.sleep(self.pace)
             self.openalex_errors.clear()
             out = (self.run_agent if config["kind"] == "agent" else self.run_pipeline)(config, q)
             self._check_openalex(q["id"])
@@ -464,6 +473,8 @@ def main():
     parser.add_argument("--score-only", action="store_true", help="Only recompute metrics")
     parser.add_argument("--no-judge", action="store_true", help="Run systems but don't label new papers")
     parser.add_argument("--force", action="store_true", help="Re-run queries that already have runs")
+    parser.add_argument("--pace", type=float, default=0.0,
+                        help="Seconds to wait between queries, for low tokens-per-minute limits (e.g. 20 for gpt-4o agents)")
     parser.add_argument("--judge-model", default=os.getenv("EVAL_JUDGE_MODEL", "gpt-4.1"))
     parser.add_argument("--output", default=os.path.join(os.path.dirname(QRELS_PATH), "results.md"))
     args = parser.parse_args()
@@ -473,7 +484,7 @@ def main():
         queries = [q for q in queries if q["id"] in set(args.queries)]
 
     if not args.score_only:
-        runner = Runner(force=args.force)
+        runner = Runner(force=args.force, pace=args.pace)
         for system in args.systems:
             print(f"Running {system} ...")
             runner.run(system, queries)
