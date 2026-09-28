@@ -74,7 +74,9 @@ def answer(papers: List[str], summary: str = "Found papers.", authors: Optional[
     """A final AgentAnswer reply."""
     return completion(content=json.dumps({
         "summary": summary,
-        "papers": [{"paper_id": p, "reason": f"{p} is relevant"} for p in papers],
+        # Entries are IDs (titled like make_work's default) or (id, title) pairs
+        "papers": [{"paper_id": p, "title": f"Paper {p[1:]}", "reason": f"{p} is relevant"} if isinstance(p, str)
+                   else {"paper_id": p[0], "title": p[1], "reason": f"{p[1]} is relevant"} for p in papers],
         "authors": [{"author_id": a, "reason": "expert"} for a in (authors or [])],
     }))
 

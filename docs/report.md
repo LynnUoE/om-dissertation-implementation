@@ -2,7 +2,7 @@
 
 **English** | [简体中文](report.zh-CN.md)
 
-*Technical report, September 2026. It covers the work in pull requests #1-#13. Every number comes from the benchmark in [`eval/`](../eval/), and can be recomputed from the committed runs and labels with `python eval/run_eval.py --score-only`.*
+*Technical report, September 2026. It covers the work in pull requests #1-#14. Every number comes from the benchmark in [`eval/`](../eval/), and can be recomputed from the committed runs and labels with `python eval/run_eval.py --score-only`.*
 
 ## Summary
 
@@ -17,7 +17,7 @@ LitFinder finds academic papers for a research request written in plain language
   - It needs **2 OpenAlex requests per search instead of 10**; the cost per search drops from about US$0.015 to about US$0.0014.
 - **Cheap LLMs are enough where the LLM does little.** gpt-4o-mini matches gpt-4o for query analysis at 1/16 of the cost.
 - **Testing cheap models exposed a tool-design bug in the agent.** After fixing it, the gpt-4o-mini agent went from 0.20 to 0.56 nDCG@10.
-- **gpt-4o-mini is now the agent's default.** Over two runs it matches gpt-4o (nDCG@10 0.567 vs 0.577, p = 0.62), and its reasons are as faithful to the papers' abstracts (94% vs 95% fully supported), at 1/11 of the cost. The one error all three models made is reversing a paper's finding.
+- **gpt-4o-mini is now the agent's default.** Over two runs it matches gpt-4o (nDCG@10 0.567 vs 0.577, p = 0.62), and its reasons are as faithful to the papers' abstracts (94% vs 95% fully supported), at 1/11 of the cost. The one error all three models made, reversing a paper's finding, came from the search tool cutting abstracts at 600 characters; longer abstracts, a grounding prompt and a title check removed it at no loss in relevance.
 - **The evaluation work also surfaced production bugs.** Two missing request timeouts could hang a search for hours, a reranker crashed under concurrent calls, and the OpenAlex client froze for five hours when its billing budget ran out.
 
 | | nDCG@10 | Canonical R@20 | Latency | Cost per search |
@@ -56,7 +56,7 @@ The work went in stages, each measured before and after:
 - **Judge:** `gpt-4.1` at temperature 0, which is not the model under test.
 - **Input:** the title and abstract of each paper, one pair per call.
 - **Grades:** 2 = highly relevant, 1 = partially relevant, 0 = not relevant.
-- **Size:** 3,972 labels in total: 2,509 highly relevant, 907 partially relevant and 556 not relevant.
+- **Size:** 3,994 labels in total: 2,524 highly relevant, 912 partially relevant and 558 not relevant.
 
 **Metrics:**
 
@@ -113,7 +113,7 @@ Focused queries alone help (0.55 → 0.73), but reranking is where the gain is (
 
 Two experiments on the keyword pipeline showed the same pattern.
 
-**1. Citation-sorted searches on titles and abstracts only.** In the first version, the searches sorted by citations matched full text. They returned famous papers that merely mention the terms, such as the R language and AlphaFold for a diffusion-models query. Matching titles and abstracts instead raised Recall@20 (0.207 → 0.226, p = 0.021) but *lowered* canonical recall (0.347 → 0.234, p = 0.003). Off-topic famous papers were easy for the reranker to discard. Recent papers whose titles closely match the query were not, and they pushed out older classics whose wording differs, such as "Denoising Diffusion Probabilistic Models" for "diffusion models for high-quality image generation".
+**1. Citation-sorted searches on titles and abstracts only.** In the first version, the searches sorted by citations matched full text. They returned famous papers that merely mention the terms, such as the R language and AlphaFold for a diffusion-models query. Matching titles and abstracts instead raised Recall@20 (0.206 → 0.225, p = 0.021) but *lowered* canonical recall (0.347 → 0.234, p = 0.003). Off-topic famous papers were easy for the reranker to discard. Recent papers whose titles closely match the query were not, and they pushed out older classics whose wording differs, such as "Denoising Diffusion Probabilistic Models" for "diffusion models for high-quality image generation".
 
 **2. A citation prior.** A citation prior blends a log-scaled citation count into the final score:
 
@@ -134,12 +134,12 @@ In February 2026 OpenAlex added semantic search: every work's title and abstract
 
 | Recall design (all with MiniLM) | nDCG@10 | Recall@20 | Canonical R@20 | OpenAlex requests |
 |---|---|---|---|---|
-| Keyword queries + 10% prior | 0.893 | 0.213 | 0.391 | 10 |
-| … + a semantic channel | 0.898 | 0.220 | 0.397 | 11 |
-| Semantic search alone (OpenAlex's order, no reranker) | 0.950 | 0.245 | 0.106 | 1 |
-| Semantic search + 10% prior | 0.969 | 0.247 | 0.106 | 1 |
-| Semantic search + citation expansion + 10% prior | 0.956 | 0.245 | 0.309 | 2 |
-| **Semantic search + citation expansion + 20% prior (default)** | **0.947** | **0.245** | **0.341** | **2** |
+| Keyword queries + 10% prior | 0.893 | 0.212 | 0.391 | 10 |
+| … + a semantic channel | 0.898 | 0.219 | 0.397 | 11 |
+| Semantic search alone (OpenAlex's order, no reranker) | 0.950 | 0.244 | 0.106 | 1 |
+| Semantic search + 10% prior | 0.969 | 0.246 | 0.106 | 1 |
+| Semantic search + citation expansion + 10% prior | 0.956 | 0.244 | 0.309 | 2 |
+| **Semantic search + citation expansion + 20% prior (default)** | **0.947** | **0.244** | **0.341** | **2** |
 
 Semantic search is the extreme end of the trade-off. It is the most topically relevant design measured, with nDCG@10 0.95 without any reranking, but only 19 of the 159 canonical papers appear anywhere in its results. Citation expansion fixes exactly this: the recent matches cite the classics, so fetching the papers they cite most often brings canonical recall from 0.11 back to 0.31 (p < 0.001), and a 20% prior brings it to 0.34.
 
@@ -242,7 +242,29 @@ What this shows:
 - **Run-to-run noise is as large as the model gap.** gpt-4o's two runs differ by 0.055 (p = 0.06), more than its first-run lead over gpt-4o-mini (0.047). Averaged over both runs, the gap is 0.01 (p = 0.62), and gpt-4o-mini finds slightly more foundational papers (canonical R@20 0.263 vs 0.244).
 - **gpt-4.1-mini is still the weakest agent**, significantly below gpt-4o on the two-run mean (p = 0.035), and the fewest of its reasons are fully supported (91%).
 - **The agent now defaults to gpt-4o-mini** (`AGENT_LLM_MODEL`), at 1/11 of gpt-4o's cost. Reading notes still use `LLM_MODEL`.
-- **The error worth fixing next is the reversed finding.** All three models made it on the same paper, so a bigger model doesn't prevent it. The abstract quotes an earlier claim before refuting it, and the models repeat the quoted claim (see §7).
+- **The error worth fixing next is the reversed finding.** All three models made it on the same paper, so a bigger model doesn't prevent it. The abstract quotes an earlier claim before refuting it, and the models repeat the quoted claim (see §3.8).
+
+### 3.8 Fixing the reversed finding
+
+The reversed finding came from the search tool, not the models. Search results showed only the first 600 characters of each abstract to keep the context small. That cut 96% of abstracts (the median is 1,314 characters), and in this paper the sentence "In this paper, we demonstrate that defensive distillation does not significantly increase the robustness" starts at character 588. The models saw the earlier claim and never saw the refutation.
+
+Two changes, each evaluated on all 32 queries with gpt-4o-mini:
+
+- **v3: longer abstracts and a grounding prompt.** Search results show up to 1,500 characters (67% of abstracts in full). The prompt says abstracts often describe earlier work before the paper's own contribution, that reasons must describe what the paper itself proposes or finds, and that a paper whose link to the request can't be stated from its abstract should be left out.
+- **v4: a title check.** v3's longer context caused a new error: three reasons were attached to the wrong paper (e.g. a reason about RegNeRF on Mip-NeRF 360). The final answer now names each paper's title before its ID and reason, and grounding checks that the title matches the ID. A mismatched reason moves to the paper whose title it names, or is dropped.
+
+| gpt-4o-mini agent | nDCG@10 | Canonical R@20 | Supported | Unsupported | Reversed findings | Reasons on the wrong paper | LLM cost per search |
+|---|---|---|---|---|---|---|---|
+| v2 (runs 1 and 2) | 0.557 / 0.576 | 0.269 / 0.256 | 94% | 3% | 1 | 0 | US$0.0021 |
+| v3: longer abstracts + prompt | 0.586 | 0.256 | 91% | 4% | 0 | 3 | US$0.0022 |
+| **v4: + title check (default)** | **0.601** | **0.275** | **94%** | **3%** | **0** | **0** | **US$0.0026** |
+
+What this shows:
+
+- **Both targeted errors are gone.** The reversed finding didn't recur, and v4 now describes that paper correctly ("critiques the effectiveness of defensive distillation ... introduces new attack strategies").
+- **Writing the title first did the work.** The title check never fired in v4's 159 recommendations, so the mismatches stopped because the model anchors each reason to the title it has just written. The check remains as a safety net.
+- **No loss in retrieval**, at about 20% more tokens from the longer abstracts. The nDCG@10 gain over v2 is within run-to-run noise (p = 0.26 against v2's second run; v4 was run once).
+- **What remains.** v4's 4 unsupported reasons are 2 stretched links (e.g. MobileNets described as related to knowledge distillation) and 2 details the abstract doesn't state. The unsupported rate (3%) is the same as before; with about 140 reasons per run, changes of a few reasons are noise.
 
 ## 4. Cost per search
 
@@ -254,7 +276,7 @@ Prices are OpenAI and OpenAlex list prices in September 2026: gpt-4o US$2.50/US$
 | Keyword pipeline + MiniLM + prior (gpt-4o) | 10 | US$0.010 | ~US$0.0046 | ~US$0.015 | 0.893 |
 | **Default: semantic + expansion + MiniLM (gpt-4o-mini)** | **2** | **US$0.0011** | **US$0.0003** | **~US$0.0014** | **0.949** |
 | Agent, gpt-4o | ≤2 | ≤US$0.002 | US$0.027 | ~US$0.029 | 0.604 |
-| **Agent (default), gpt-4o-mini** | ≤5 | ≤US$0.005 | US$0.0021 | ≤US$0.007 | 0.557 |
+| **Agent (default), gpt-4o-mini** | ≤5 | ≤US$0.005 | US$0.0026 | ≤US$0.008 | 0.601 |
 
 For the agent, the OpenAlex column is an upper bound: it counts every tool call, and some calls are free single-paper lookups (the eval doesn't separate them).
 
@@ -294,7 +316,7 @@ Several problems only showed up because the evaluation ran thousands of real req
 
 ## 7. Future work
 
-- **Fixing reversed findings in agent reasons.** Tell the agent that earlier work an abstract quotes is not the paper's own finding, or check each reason against its abstract before returning it and drop or rewrite the ones that fail.
+- **Stretched links in agent reasons.** About 3% of reasons still claim a connection the abstract doesn't support. Checking each reason against its abstract before returning it (a cheap model, one call per search) would catch these, at the cost of one more LLM call.
 - **Agentic RAG.**
   - Give the agent the default pipeline as a tool.
   - Decompose multi-part questions and check whether the evidence covers every part.
@@ -316,4 +338,4 @@ System names in `eval/results.md` read as `<recall>+<reranker>+<options>@<model>
 
 - **Recall:** `single_query` is the original; `multi_query_v1` and `multi_query` are the keyword designs (`_v1` matches full text for citation-sorted searches); `semantic` is semantic search.
 - **Options:** `citeX` is a citation prior of weight X; `expand` is citation expansion.
-- **Agents:** `agent-v2` is the agent after the tool fix; `.run2` is its second run, which also saved reasons.
+- **Agents:** `agent-v2` is the agent after the tool fix; `.run2` is its second run, which also saved reasons; `agent-v3` adds longer abstracts and the grounding prompt, and `agent-v4` the title check (§3.8).

@@ -21,7 +21,9 @@ from retrieval import Reranker, rerank, title_abstract_filter, title_key
 
 MAX_LIMIT = 25
 RERANK_POOL = 50  # With a reranker, relevance searches fetch this many results and keep the best `limit`
-ABSTRACT_CHARS = 600
+# Abstracts often state prior work first and the paper's own finding later; at 600 characters 96% of
+# abstracts were cut, and the agent once reported a claim a paper refutes. 1500 shows 67% in full.
+ABSTRACT_CHARS = 1500
 
 PAPER_SORTS = {
     "relevance": "relevance_score:desc",

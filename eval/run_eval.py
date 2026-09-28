@@ -106,6 +106,14 @@ SYSTEMS: Dict[str, Dict] = {
                                    "about": "Second run of agent-v2@gpt-4.1-mini, with reasons saved"},
     "agent-v2@gpt-4o-mini.run2": {"kind": "agent", "model": "gpt-4o-mini",
                                   "about": "Second run of agent-v2@gpt-4o-mini, with reasons saved"},
+    # Reason grounding: search results show abstracts up to 1500 characters instead of 600, and the
+    # prompt says to describe the paper's own findings, not the earlier work its abstract cites
+    "agent-v3@gpt-4o-mini": {"kind": "agent", "model": "gpt-4o-mini",
+                             "about": "Agent with longer abstracts and the reason-grounding prompt, gpt-4o-mini"},
+    # The final answer names each paper's title too; a reason attached to the wrong ID moves to the
+    # paper whose title it names, or is dropped
+    "agent-v4@gpt-4o-mini": {"kind": "agent", "model": "gpt-4o-mini",
+                             "about": "agent-v3 plus the title check on each recommended paper, gpt-4o-mini"},
     "agent+rerank": {"kind": "agent", "reranker": MINILM,
                      "about": "Agent whose search_papers tool reranks with the MiniLM cross-encoder"},
 }
@@ -298,7 +306,8 @@ class Runner:
                 "llm_calls": usage["llm_calls"], "llm_tokens": usage["prompt_tokens"] + usage["completion_tokens"],
                 "prompt_tokens": usage["prompt_tokens"], "completion_tokens": usage["completion_tokens"],
                 "model": config.get("model", self.model),
-                "tool_calls": len(result["agent"]["trace"]), "dropped_ids": len(result["agent"]["dropped_ids"])}
+                "tool_calls": len(result["agent"]["trace"]), "dropped_ids": len(result["agent"]["dropped_ids"]),
+                "remapped_ids": len(result["agent"].get("remapped_ids", []))}
 
     def run(self, system: str, queries: List[Dict]) -> None:
         config = SYSTEMS[system]
