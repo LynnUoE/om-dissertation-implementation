@@ -10,7 +10,10 @@ Loop:
      set tool_choice="none" so the model has to answer with what it has.
 
 The final answer may only cite papers/authors that tools actually returned;
-anything else is dropped and reported in the trace.
+anything else is dropped and reported in the trace. Each paper also carries
+its title, which must match the ID: a reason written for one paper but
+attached to another's ID is moved to the paper whose title it names, or
+dropped.
 """
 import json
 import logging
@@ -23,7 +26,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from llm import create_with_schema, parse_reply
 from openalex_client import OpenAlexClient
-from retrieval import Reranker
+from retrieval import Reranker, title_key
 from tools import ToolExecutor, tool_result_json
 
 logger = logging.getLogger("ResearchAgent")
@@ -43,11 +46,14 @@ Final answer:
 - Recommend only papers and authors that appeared in tool results, using their exact IDs. Never invent IDs.
 - Recommend only papers whose title or abstract is about the request. Recommending fewer papers is better than including off-topic ones.
 - Rank papers by how directly they address the request, not by citation count alone.
-- Each reason must say what the paper actually does, based on its title and abstract. Never claim a paper covers something its abstract doesn't mention."""
+- Each reason must say what the paper actually does, based on its title and abstract. Never claim a paper covers something its abstract doesn't mention.
+- Abstracts often describe earlier work before the paper's own contribution ("In this paper, we ..."). Describe what this paper proposes or finds, not the claims it cites, which it may refute. If an abstract ends with "..." and your reason depends on the paper's findings, check it with get_paper.
+- If you can't say from the abstract how a paper addresses the request, leave it out rather than stretching a connection."""
 
 
 class SelectedPaper(BaseModel):
-    paper_id: str = Field(description="paper_id exactly as returned by a tool, e.g. 'W2741809807'")
+    title: str = Field(description="The paper's title exactly as returned by a tool")
+    paper_id: str = Field(description="paper_id of that title exactly as returned by a tool, e.g. 'W2741809807'")
     reason: str = Field(description="One or two sentences on why this paper matches the request")
 
 
@@ -183,17 +189,41 @@ class ResearchAgent:
         return {"step": step, "tool": call.function.name, "arguments": arguments,
                 "result": summary, "duration_ms": duration_ms}
 
+    @staticmethod
+    def _match_title(paper: SelectedPaper, executor: ToolExecutor) -> Optional[str]:
+        """
+        The ID of the returned paper this answer entry is about: its own ID if the
+        titles agree, else the paper whose title the entry names (the model mixed up
+        IDs), else None.
+        """
+        def same(a: str, b: str) -> bool:
+            # The model sometimes shortens a title, e.g. drops the subtitle
+            short, full = sorted((a, b), key=len)
+            return bool(short) and (short == full or (len(short) >= 20 and full.startswith(short)))
+
+        paper_id = paper.paper_id.strip().replace("https://openalex.org/", "")
+        wanted = title_key(paper.title)
+        work = executor.seen_papers.get(paper_id)
+        if work is not None and same(wanted, title_key(work.get("title") or "")):
+            return paper_id
+        matches = [pid for pid, w in executor.seen_papers.items() if same(wanted, title_key(w.get("title") or ""))]
+        return matches[0] if len(matches) == 1 else None
+
     def _build_result(self, query: str, answer: AgentAnswer, executor: ToolExecutor,
                       agent: Dict, start: float) -> Dict:
-        # Grounding: keep only IDs the tools actually returned
+        # Grounding: keep only IDs the tools actually returned, and whose title matches the answer's
         dropped: List[str] = []
+        remapped: List[str] = []
         results, seen = [], set()
         for paper in answer.papers:
-            paper_id = paper.paper_id.strip().replace("https://openalex.org/", "")
-            if paper_id in seen:
+            given_id = paper.paper_id.strip().replace("https://openalex.org/", "")
+            paper_id = self._match_title(paper, executor)
+            if paper_id is None:
+                dropped.append(given_id)
                 continue
-            if paper_id not in executor.seen_papers:
-                dropped.append(paper_id)
+            if paper_id != given_id:
+                remapped.append(f"{given_id}->{paper_id}")
+            if paper_id in seen:
                 continue
             seen.add(paper_id)
             publication = self.format_paper(executor.seen_papers[paper_id])
@@ -213,8 +243,11 @@ class ResearchAgent:
                 dropped.append(author_id)
 
         if dropped:
-            logger.warning(f"Dropped IDs not returned by any tool: {dropped}")
+            logger.warning(f"Dropped IDs not returned by any tool or whose title didn't match: {dropped}")
+        if remapped:
+            logger.warning(f"Moved reasons to the paper whose title they named: {remapped}")
         agent["dropped_ids"] = dropped
+        agent["remapped_ids"] = remapped
         return {
             "status": "success",
             "original_query": query,

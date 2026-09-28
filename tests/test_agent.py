@@ -1,9 +1,10 @@
 import httpx2 as httpx
 import openai
 
-from agent import ResearchAgent
+from agent import ResearchAgent, SelectedPaper
+from tools import ToolExecutor
 
-from conftest import FakeLLM, answer, completion, tool_call
+from conftest import FakeLLM, FakeOpenAlex, answer, completion, make_work, tool_call
 
 SEARCH = {"query": "gnn drug discovery", "from_year": None, "to_year": None,
           "min_citations": None, "sort": "relevance", "limit": 5}
@@ -99,3 +100,26 @@ def test_invalid_final_answer_becomes_502(fake_openalex):
     result = make_agent(FakeLLM([completion(content='{"summary": "missing fields"}')]), fake_openalex).run("gnn")
     assert result["status"] == "error" and result["http_status"] == 502
     assert "invalid final answer" in result["message"]
+
+
+def test_reasons_follow_the_title_they_name(fake_openalex):
+    llm = FakeLLM([
+        completion(tool_calls=[tool_call("call_1", "search_papers", SEARCH)]),
+        answer([("W1", "Paper 2"),          # right title, wrong ID: the reason moves to W2
+                ("W3", "Paper 3"),          # consistent
+                ("W1", "An unknown paper")]),  # the title matches nothing returned: dropped
+    ])
+    result = make_agent(llm, fake_openalex).run("gnn")
+
+    assert [(r["title"], r["agent_reason"]) for r in result["results"]] == [
+        ("Paper 2", "Paper 2 is relevant"), ("Paper 3", "Paper 3 is relevant")]
+    assert result["agent"]["remapped_ids"] == ["W1->W2"]
+    assert result["agent"]["dropped_ids"] == ["W1"]
+
+
+def test_shortened_titles_still_match():
+    ex = ToolExecutor(FakeOpenAlex())
+    ex.seen_papers["W1"] = make_work(1, title="Attention Is All You Need: Transformers for Translation")
+    assert ResearchAgent._match_title(SelectedPaper(title="Attention is all you need", paper_id="W1", reason=""), ex) == "W1"
+    # Too short to trust as a prefix
+    assert ResearchAgent._match_title(SelectedPaper(title="Attention", paper_id="W1", reason=""), ex) is None

@@ -95,21 +95,21 @@ The earlier keyword design is still available as `RETRIEVAL_STRATEGY=multi_query
 
 - **Queries:** 32 research requests across ML, biology, medicine, materials, climate and social science.
 - **Canonical papers:** 159 foundational papers picked by hand, 4-5 per query.
-- **Relevance labels:** 3,972 graded labels from a `gpt-4.1` judge, covering every paper any system returned in its top 20.
+- **Relevance labels:** 3,994 graded labels from a `gpt-4.1` judge, covering every paper any system returned in its top 20.
 
 Selected systems (full table in [eval/results.md](eval/results.md); the [technical report](docs/report.md) walks through every experiment):
 
 | System | nDCG@10 | Recall@20 | Canonical R@20 | Median latency | OpenAlex requests |
 |---|---|---|---|---|---|
-| Original pipeline (one long query) | 0.550 | 0.096 | 0.006 | 4.5 s | 1 |
-| Keyword queries, no reranker | 0.731 | 0.144 | 0.370 | 5.5 s | 10 |
-| Keyword queries + MiniLM | 0.924 | 0.226 | 0.234 | 6.1 s | 10 |
-| Keyword queries + MiniLM + 10% citation prior (`multi_query`) | 0.893 | 0.213 | 0.391 | 6.1 s | 10 |
-| … + a semantic search channel (`SEMANTIC_RECALL=true`) | 0.898 | 0.220 | 0.397 | 6.4 s | 11 |
-| Semantic search alone, OpenAlex's order | 0.950 | 0.245 | 0.106 | 3.9 s | 1 |
-| Semantic search + MiniLM + 10% citation prior | 0.969 | 0.247 | 0.106 | 4.1 s | 1 |
-| **Semantic search + citation expansion + MiniLM + 20% prior (default)** | **0.947** | **0.245** | **0.341** | **4.9 s** | **2** |
-| Agent search (gpt-4o-mini, default) | 0.557 | 0.052 | 0.269 | 6.3 s | ≤5 |
+| Original pipeline (one long query) | 0.550 | 0.095 | 0.006 | 4.5 s | 1 |
+| Keyword queries, no reranker | 0.731 | 0.143 | 0.370 | 5.5 s | 10 |
+| Keyword queries + MiniLM | 0.924 | 0.225 | 0.234 | 6.1 s | 10 |
+| Keyword queries + MiniLM + 10% citation prior (`multi_query`) | 0.893 | 0.212 | 0.391 | 6.1 s | 10 |
+| … + a semantic search channel (`SEMANTIC_RECALL=true`) | 0.898 | 0.219 | 0.397 | 6.4 s | 11 |
+| Semantic search alone, OpenAlex's order | 0.950 | 0.244 | 0.106 | 3.9 s | 1 |
+| Semantic search + MiniLM + 10% citation prior | 0.969 | 0.246 | 0.106 | 4.1 s | 1 |
+| **Semantic search + citation expansion + MiniLM + 20% prior (default)** | **0.947** | **0.244** | **0.341** | **4.9 s** | **2** |
+| Agent search (gpt-4o-mini, default) | 0.601 | 0.057 | 0.275 | 6.5 s | ≤5 |
 
 What the numbers show:
 
@@ -145,7 +145,14 @@ After the fix, gpt-4o-mini is close to gpt-4o (nDCG@10 0.557 vs 0.604, p = 0.085
 | gpt-4.1-mini | 91% | 4% | US$0.0055 |
 | **gpt-4o-mini (default)** | **94%** | **3%** | **US$0.0021** |
 
-So the agent now uses gpt-4o-mini by default (`AGENT_LLM_MODEL`), at 1/11 of the cost and half the latency. The most serious error, which all three models made on the same paper, is repeating a claim that the abstract quotes and then refutes. gpt-4.1-mini is significantly worse than gpt-4o (p = 0.035 over both runs). See the [report](docs/report.md#37-are-the-agents-reasons-faithful) for details.
+So the agent now uses gpt-4o-mini by default (`AGENT_LLM_MODEL`), at 1/11 of the cost and half the latency. gpt-4.1-mini is significantly worse than gpt-4o (p = 0.035 over both runs).
+
+The most serious error, which all three models made on the same paper, was repeating a claim that the abstract quotes and then refutes. The cause was the search tool: it showed only the first 600 characters of each abstract, which cut 96% of them, often before the paper's own finding. Two changes fixed it:
+
+- **Longer abstracts and a grounding prompt.** Search results show up to 1500 characters (67% of abstracts in full), and the prompt says to describe the paper's own findings, not the earlier work its abstract cites.
+- **Title check.** The final answer names each paper's title before its ID and reason. With longer contexts gpt-4o-mini had attached three reasons to the wrong paper; writing the title first stopped that, and a reason whose title doesn't match its ID is now moved to the paper it names, or dropped.
+
+With both, the gpt-4o-mini agent made neither error, 94% of its reasons were fully supported, and nDCG@10 was 0.601, at about 20% more tokens. See the [report](docs/report.md#37-are-the-agents-reasons-faithful) for details.
 
 Run it with `python eval/run_eval.py`.
 

@@ -3,7 +3,7 @@ import json
 import pytest
 
 from openalex_client import OpenAlexClient
-from tools import MAX_LIMIT, ToolExecutor
+from tools import ABSTRACT_CHARS, MAX_LIMIT, ToolExecutor
 
 from conftest import FakeOpenAlex, make_work
 
@@ -37,10 +37,10 @@ def test_search_papers_returns_compact_papers_and_remembers_them(fake_openalex):
 
 
 def test_long_abstracts_are_truncated_in_search_results():
-    long_abstract = " ".join(f"word{i}" for i in range(500))
+    long_abstract = " ".join(f"word{i}" for i in range(1000))
     ex = ToolExecutor(FakeOpenAlex([make_work(1, abstract=long_abstract)]))
     paper = ex.execute("search_papers", search_args())["papers"][0]
-    assert len(paper["abstract"]) <= 610 and paper["abstract"].endswith("...")
+    assert len(paper["abstract"]) <= ABSTRACT_CHARS + 4 and paper["abstract"].endswith("...")
 
 
 def test_limit_is_clamped(fake_openalex):

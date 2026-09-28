@@ -54,7 +54,7 @@ Each paper the agent recommends comes with a one-sentence reason. [faithfulness.
 - **partially_supported:** the main claim holds, but a detail isn't in the abstract or is overstated;
 - **unsupported:** a key claim is missing from the abstract or contradicts it.
 
-Papers without an abstract, or with only a teaser under 100 characters, can't be checked and are counted separately. Verdicts are saved in [faithfulness.jsonl](faithfulness.jsonl) and never re-judged; the summary and every unsupported reason are in [faithfulness.md](faithfulness.md). Only the `.run2` agent runs saved reasons.
+Papers without an abstract, or with only a teaser under 100 characters, can't be checked and are counted separately. Verdicts are saved in [faithfulness.jsonl](faithfulness.jsonl) and never re-judged; the summary and every unsupported reason are in [faithfulness.md](faithfulness.md). Agent runs from `.run2` on (`agent-v2*.run2`, `agent-v3`, `agent-v4`) saved reasons.
 
 ```bash
 python eval/faithfulness.py --systems agent-v2.run2 agent-v2@gpt-4o-mini.run2 agent-v2@gpt-4.1-mini.run2
