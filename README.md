@@ -298,10 +298,12 @@ backend/
 ├── retrieval.py           # Retrieval: semantic and keyword recall, rerankers, citation expansion
 ├── research_analyzer.py   # LLM analysis of publications
 ├── openalex_client.py     # OpenAlex API client
+├── usage_limits.py        # Per-client and daily limits for public deployments
 └── .env.example           # Configuration template
 frontend/                  # Static HTML/CSS/JS UI
 eval/                      # Retrieval benchmark: queries, labels, runs, results
-docs/                      # Technical report (EN/ZH) and its figures
+docs/                      # Technical report and EC2 deployment guide (EN/ZH)
+deploy/                    # Production setup: Caddy, compose overrides, server scripts
 tests/                     # Offline unit tests
 config/nginx.conf          # Example Nginx config for deployment
 .mcp.json                  # Registers the MCP server for Claude Code
@@ -335,6 +337,8 @@ To use the image as an MCP server over stdio, e.g. in Claude Desktop, have the h
 ```
 
 ## Deployment
+
+**Public server on AWS EC2.** [docs/deploy-ec2.md](docs/deploy-ec2.md) walks through a ~US$17/month setup: one t4g.small instance running the Docker Compose stack behind Caddy, which gets HTTPS certificates automatically and requires a token for `/mcp`. For a public deployment the app enforces usage limits on every endpoint that spends API credit (per client per hour and per day site-wide, HTTP 429 with `Retry-After` when exceeded), so a public link can't run up your bill.
 
 Without Docker, Nginx can serve `frontend/` and proxy `/api/` to Flask. `config/nginx.conf` is an example; set its `root` paths to your checkout. The frontend calls the same-origin path `/api`, so it works unchanged behind the proxy.
 

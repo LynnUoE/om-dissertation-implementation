@@ -298,11 +298,13 @@ backend/
 ├── retrieval.py           # 检索：语义召回和关键词召回、reranker、引文扩展
 ├── research_analyzer.py   # 用 LLM 分析论文
 ├── openalex_client.py     # OpenAlex API 客户端
+├── usage_limits.py        # 公开部署时的访客级和每日用量限制
 └── .env.example           # 配置模板
 frontend/                  # 静态 HTML/CSS/JS 界面
 eval/                      # 检索评测集：查询、标签、运行结果、评测结果
-docs/                      # 技术报告（中英文）及其图表
+docs/                      # 技术报告和 EC2 部署指南（中英文）
 tests/                     # 离线单元测试
+deploy/                    # 生产环境配置：Caddy、compose 覆盖配置、服务器脚本
 config/nginx.conf          # 部署用的 Nginx 配置示例
 .mcp.json                  # 为 Claude Code 注册 MCP server
 Dockerfile, docker-compose.yml
@@ -335,6 +337,8 @@ Web 应用由 gunicorn 运行（`backend/wsgi.py`）。镜像设置了 `HF_HUB_O
 ```
 
 ## 部署
+
+**在 AWS EC2 上公开部署。** [docs/deploy-ec2.zh-CN.md](docs/deploy-ec2.zh-CN.md) 介绍了一套每月约 17 美元的方案：一台 t4g.small 服务器运行 Docker Compose，前面由 Caddy 自动配置 HTTPS，并要求访问 `/mcp` 时携带 token。公开部署时，应用会对每个产生 API 费用的接口做用量限制（每个访客每小时、全站每天两级上限，超过时返回 HTTP 429 和 `Retry-After`），公开的链接不会刷爆你的账单。
 
 不用 Docker 的话，可以用 Nginx 提供 `frontend/` 静态文件，并把 `/api/` 反向代理到 Flask。`config/nginx.conf` 是一份示例配置，需要把其中的 `root` 路径改成你的项目路径。前端通过同源路径 `/api` 调用接口，所以放在反向代理后面无需修改。
 

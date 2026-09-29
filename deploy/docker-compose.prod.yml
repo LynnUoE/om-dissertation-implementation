@@ -1,0 +1,46 @@
+# Production overrides for a public server (see docs/deploy-ec2.md). Use deploy/deploy.sh,
+# which runs:
+#   docker compose --env-file deploy/.env -f docker-compose.yml -f deploy/docker-compose.prod.yml \
+#     --profile mcp up -d --build
+#
+# Caddy terminates HTTPS on ports 80/443; the app and the MCP server are reachable only through it.
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  web:
+    ports: !reset []
+    environment:
+      USAGE_LIMITS: "true"  # Per-client and daily limits on costly endpoints (LIMIT_* in backend/.env)
+      TRUST_PROXY: "true"   # Client IPs come from Caddy's X-Forwarded-For
+      CORS_ORIGINS: ""      # Only the bundled frontend (same origin) may call the API
+    logging: *logging
+
+  mcp:
+    ports: !reset []
+    logging: *logging
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on: [web]
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?Set SITE_ADDRESS in deploy/.env}
+      MCP_TOKEN: ${MCP_TOKEN:?Set MCP_TOKEN in deploy/.env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data      # Certificates: keep them, or Let's Encrypt rate limits can bite
+      - caddy_config:/config
+    restart: unless-stopped
+    logging: *logging
+
+volumes:
+  caddy_data:
+  caddy_config:

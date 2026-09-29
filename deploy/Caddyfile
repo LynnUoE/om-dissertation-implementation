@@ -1,0 +1,26 @@
+# HTTPS reverse proxy for the public deployment (see docs/deploy-ec2.md).
+# SITE_ADDRESS and MCP_TOKEN come from deploy/.env. Caddy gets and renews the
+# certificate for SITE_ADDRESS by itself.
+{$SITE_ADDRESS} {
+	encode zstd gzip
+
+	# The MCP endpoint has no per-client limits and spends the OpenAlex budget, so it needs the token
+	@mcp path /mcp /mcp/*
+	handle @mcp {
+		@unauthorized not header Authorization "Bearer {$MCP_TOKEN}"
+		respond @unauthorized 401
+		reverse_proxy mcp:8000
+	}
+
+	# The web app and its API (rate-limited by the app itself)
+	handle {
+		reverse_proxy web:5001
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
