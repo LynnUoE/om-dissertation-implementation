@@ -14,6 +14,8 @@ from research_analyzer import create_analyzer
 from literature_searcher import create_literature_searcher, LiteratureSearcher
 from agent import ResearchAgent
 from llm import DEFAULT_LLM_MODEL
+from usage_limits import Limit, UsageLimiter
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -61,7 +63,20 @@ class Config:
     PORT = int(os.getenv("PORT", "5001"))
     REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "120"))  # Seconds
     MAX_RESULTS = int(os.getenv("MAX_RESULTS", "20"))
-    
+    # Public deployments: per-client hourly and site-wide daily limits on the endpoints that
+    # spend OpenAI/OpenAlex credit (see usage_limits.py). Off by default for local use.
+    USAGE_LIMITS = os.getenv("USAGE_LIMITS", "false").lower() == "true"
+    # "<per client per hour>,<per UTC day>"; the defaults keep OpenAlex within its free $1/day
+    LIMIT_SEARCH = Limit.parse(os.getenv("LIMIT_SEARCH"), Limit(20, 300))    # ~$0.0014 each
+    LIMIT_AGENT = Limit.parse(os.getenv("LIMIT_AGENT"), Limit(10, 100))      # ~$0.003-0.008 each
+    LIMIT_ANALYZE = Limit.parse(os.getenv("LIMIT_ANALYZE"), Limit(10, 50))   # one LLM_MODEL call each
+    LIMIT_DETAILS = Limit.parse(os.getenv("LIMIT_DETAILS"), Limit(60, 1000)) # ~$0.0001 each
+    # Behind exactly one reverse proxy (Caddy in deploy/): take the client IP from X-Forwarded-For.
+    # Never enable it when clients can reach the app directly, or they can fake their IP.
+    TRUST_PROXY = os.getenv("TRUST_PROXY", "false").lower() == "true"
+    # Origins allowed to call the API from a browser; empty = same origin only (the bundled frontend)
+    CORS_ORIGINS = [o.strip() for o in os.getenv("CORS_ORIGINS", "*").split(",") if o.strip()]
+
     @classmethod
     def validate(cls):
         """Validate required configuration"""
@@ -73,7 +88,43 @@ class Config:
 
 # Initialize Flask application
 app = Flask(__name__, static_folder=Config.STATIC_FOLDER)
-CORS(app)  # Enable CORS for all routes
+if Config.CORS_ORIGINS:
+    CORS(app, origins=Config.CORS_ORIGINS)
+if Config.TRUST_PROXY:
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+# Endpoint -> usage-limit bucket; endpoints not listed are free (static files, health check)
+LIMITED_ENDPOINTS = {
+    'search_literature': 'search',
+    'advanced_search': 'search',
+    'interdisciplinary_search': 'search',
+    'process_query': 'search',
+    'agent_search': 'agent',
+    'analyze_publication': 'analyze',
+    'get_publication_details': 'details',
+}
+usage_limiter: Optional[UsageLimiter] = UsageLimiter(
+    {'search': Config.LIMIT_SEARCH, 'agent': Config.LIMIT_AGENT,
+     'analyze': Config.LIMIT_ANALYZE, 'details': Config.LIMIT_DETAILS},
+    labels={'search': 'searches', 'agent': 'agent searches',
+            'analyze': 'paper analyses', 'details': 'paper lookups'},
+) if Config.USAGE_LIMITS else None
+
+
+@app.before_request
+def enforce_usage_limits():
+    """Answer 429 with a Retry-After header once a client or the whole site hits a limit"""
+    bucket = LIMITED_ENDPOINTS.get(request.endpoint)
+    if usage_limiter is None or bucket is None:
+        return None
+    blocked = usage_limiter.check(bucket, request.remote_addr or 'unknown')
+    if blocked is None:
+        return None
+    logger.warning(f"Usage limit hit: {bucket} from {request.remote_addr}")
+    response = jsonify({'status': 'error', 'message': blocked.message, 'retry_after': blocked.retry_after})
+    response.status_code = 429
+    response.headers['Retry-After'] = str(blocked.retry_after)
+    return response
 
 # Configure logging
 logging.basicConfig(
@@ -158,7 +209,8 @@ def health_check():
         'status': 'healthy',
         'timestamp': datetime.now().isoformat(),
         'version': '1.0.0',
-        'stats': request_stats
+        'stats': request_stats,
+        'usage': usage_limiter.usage() if usage_limiter else None
     })
 
 @app.route('/api/search', methods=['POST'])
