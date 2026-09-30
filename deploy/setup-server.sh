@@ -6,6 +6,13 @@
 #   sudo bash deploy/setup-server.sh
 set -euo pipefail
 
+# Only on the server: on a laptop this would try to change system settings
+if ! grep -qs '^ID=ubuntu' /etc/os-release; then
+    echo "This script sets up the Ubuntu server. Log in to it first (ssh -i <key>.pem ubuntu@<server IP>)," >&2
+    echo "then run it there. Nothing was changed on this machine." >&2
+    exit 1
+fi
+
 if [ "$(id -u)" -ne 0 ]; then
     echo "Run it with sudo: sudo bash deploy/setup-server.sh" >&2
     exit 1
