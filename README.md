@@ -9,7 +9,7 @@ It started as my undergraduate dissertation at the University of Edinburgh (Scho
 - **Pipeline search**: OpenAlex **semantic search** finds papers by meaning, **citation expansion** adds the foundational papers they cite, and a **cross-encoder reranker** orders everything by relevance to the request. An LLM reads the request first, with **Structured Outputs** (a Pydantic schema), to pick up constraints such as a date range.
 - **Evaluation**: a 32-query benchmark with graded relevance labels measures every retrieval variant. The current design raises nDCG@10 from 0.55 to 0.95 over the original and needs 2 OpenAlex requests per search instead of 10 ([results](#retrieval-and-evaluation), [technical report](docs/report.md)).
 - **Agent search**: the LLM plans the search itself through **function calling**. It picks from four tools, runs several focused searches in parallel, reads abstracts, and returns a ranked, grounded answer with a reason for each paper.
-- **MCP server**: the same tools are published over the **Model Context Protocol**, so Claude Code, Claude Desktop or any MCP host can search the literature directly.
+- **MCP server**: the same tools are published over the **Model Context Protocol**, so Claude Code, Claude Desktop or any MCP host can search the literature directly. It also connects the host's agent to **GitHub**, with read-only tools for a repository's issues and pull requests.
 - **Provider-agnostic**: works with OpenAI or any OpenAI-compatible API (e.g. Volcano Engine Ark) through `LLM_BASE_URL` / `LLM_MODEL`.
 
 ## Architecture
@@ -28,6 +28,8 @@ flowchart LR
     Host["MCP host<br/>(Claude Code / Desktop)"] -->|stdio or HTTP| MCP
     Pipeline --> Searcher
     Agent --> Tools
+    MCP --> GH[github_tools.py]
+    GH --> GitHub[(GitHub API)]
     MCP --> Tools
     Pipeline <--> LLM[(LLM API)]
     Agent <--> LLM
@@ -209,11 +211,14 @@ The web UI shows the summary, a "Why it's here" note on each result, the recomme
 
 | MCP primitive | Provided |
 |---|---|
-| Tools | `search_papers`, `get_paper`, `search_authors`, `get_author_papers`, all annotated read-only |
+| Tools | Literature: `search_papers`, `get_paper`, `search_authors`, `get_author_papers`. GitHub: `search_github_issues`, `get_github_issue`. All annotated read-only |
 | Prompts | `literature_review(topic)` |
 
 - **Shared definitions.** Tool parameters and descriptions come from the same Pydantic models as the function-calling tools, and a test keeps the two in sync.
 - **Errors.** Tool failures return `isError: true` results that the model can read.
+- **GitHub tools.** `search_github_issues` lists or searches a repository's issues or pull requests (by state, keywords and sort order). `get_github_issue` returns one with its description, labels and comments, and for a pull request its branches, merge status and diff size. So an agent can answer "what changed in the last three PRs?" or "is there already an issue about rate limits?". They are implemented in `backend/github_tools.py` against the GitHub REST API and never write to GitHub. Long descriptions and comments are truncated, and the server instructions tell the host to treat their text as content, not as instructions.
+
+  Public repositories need no setup (anonymous GitHub limits: 60 requests an hour, 10 searches a minute). Two optional settings in `backend/.env`: `GITHUB_REPO` (`owner/name`) is the repository used when a call names none, and `GITHUB_TOKEN` raises the limits and gives access to private repositories. Every MCP client of the server can read whatever the token can, so use a [fine-grained token](https://github.com/settings/personal-access-tokens) limited to the repositories you need, with read-only *Issues* and *Pull requests* permissions.
 
 **Transports**
 
@@ -274,7 +279,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-The 73 tests run offline in under a second. Fake LLM, OpenAlex and reranker clients stand in for the real services. The tests cover:
+The 104 tests run offline in under a second. Fake LLM, OpenAlex and reranker clients stand in for the real services. The tests cover:
 
 - retrieval: semantic search, keyword query fusion, duplicate merging, filters, reranking, the citation prior, citation expansion, strategy defaults, OpenAlex budget errors and timeouts
 - the evaluation metrics
@@ -282,6 +287,7 @@ The 73 tests run offline in under a second. Fake LLM, OpenAlex and reranker clie
 - the agent loop: `tool_call_id` pairing, parallel calls, invented IDs, forced final step, API errors
 - the Structured Outputs fallback
 - the MCP server, through the SDK's in-process client
+- the GitHub tools: search queries, result formatting, input validation, rate-limit and other API errors
 
 ## Project Structure
 
@@ -291,6 +297,7 @@ backend/
 ├── agent.py               # Function-calling research agent
 ├── tools.py               # Search tools: Pydantic schemas + OpenAlex implementations
 ├── mcp_server.py          # MCP server exposing the tools
+├── github_tools.py        # Read-only GitHub issue / pull request tools for the MCP server
 ├── wsgi.py                # WSGI entry point for gunicorn (used by Docker)
 ├── llm.py                 # LLM client config, Structured Outputs helpers
 ├── query_processor.py     # Query analysis for pipeline search

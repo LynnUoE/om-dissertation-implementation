@@ -9,7 +9,7 @@ LitFinder 是一个基于大语言模型的学术文献检索系统。用自然�
 - **流水线检索**：OpenAlex **语义搜索**按意思找论文，**引文扩展**补上它们引用的奠基性论文，再用 **cross-encoder reranker** 按与需求的相关度排序。LLM 会先用 **Structured Outputs**（Pydantic schema 约束输出）阅读需求，识别日期范围等限制条件。
 - **评测**：一个包含 32 个查询、带分级相关度标签的评测集，用来衡量每一种检索方案。和原始设计相比，现在的方案把 nDCG@10 从 0.55 提高到 0.95，每次检索的 OpenAlex 请求也从 10 次降到 2 次（[结果](#检索与评测)，[技术报告](docs/report.zh-CN.md)）。
 - **Agent 检索**：LLM 通过 **function calling** 自己规划检索过程。它从 4 个工具中选择调用，并行执行多个聚焦的检索，阅读摘要，最后返回排好序、经过 grounding 校验的答案，每篇论文都附有推荐理由。
-- **MCP server**：同一套工具通过 **Model Context Protocol** 对外提供，Claude Code、Claude Desktop 或任何 MCP 宿主程序都可以直接用来检索文献。
+- **MCP server**：同一套工具通过 **Model Context Protocol** 对外提供，Claude Code、Claude Desktop 或任何 MCP 宿主程序都可以直接用来检索文献。它还把宿主程序的 Agent 连接到 **GitHub**，提供读取仓库 issue 和 pull request 的只读工具。
 - **不绑定服务商**：通过 `LLM_BASE_URL` / `LLM_MODEL` 可以使用 OpenAI，或任何兼容 OpenAI 接口的服务（例如火山方舟）。
 
 ## 架构
@@ -28,6 +28,8 @@ flowchart LR
     Host["MCP 宿主<br/>(Claude Code / Desktop)"] -->|stdio 或 HTTP| MCP
     Pipeline --> Searcher
     Agent --> Tools
+    MCP --> GH[github_tools.py]
+    GH --> GitHub[(GitHub API)]
     MCP --> Tools
     Pipeline <--> LLM[(LLM API)]
     Agent <--> LLM
@@ -209,11 +211,14 @@ Web 界面会显示 Agent 的总结、每条结果的"Why it's here"推荐理由
 
 | MCP 能力 | 提供的内容 |
 |---|---|
-| Tools | `search_papers`、`get_paper`、`search_authors`、`get_author_papers`，全部标注为只读 |
+| Tools | 文献：`search_papers`、`get_paper`、`search_authors`、`get_author_papers`；GitHub：`search_github_issues`、`get_github_issue`。全部标注为只读 |
 | Prompts | `literature_review(topic)` |
 
 - **定义共享。** 工具的参数和说明与 function calling 使用同一组 Pydantic 模型，并有测试保证两者一致。
 - **错误处理。** 工具出错时返回 `isError: true` 的结果，附带模型能看懂的错误信息。
+- **GitHub 工具。** `search_github_issues` 列出或搜索一个仓库的 issue 或 pull request（可按状态、关键词筛选并排序）。`get_github_issue` 返回其中一条的描述、标签和评论，如果是 pull request，还包括分支、合并状态和改动规模。这样 Agent 就能回答“最近三个 PR 改了什么？”“有没有关于限流的 issue？”这类问题。实现在 `backend/github_tools.py`，调用 GitHub REST API，不会向 GitHub 写入任何内容。过长的描述和评论会被截断，server 的说明也会提醒宿主程序：这些文字是要汇报的内容，不是指令。
+
+  公开仓库无需任何配置（GitHub 匿名限额：每小时 60 次请求，每分钟 10 次搜索）。`backend/.env` 中有两个可选项：`GITHUB_REPO`（`owner/name`）是调用时没有指定仓库时使用的默认仓库；`GITHUB_TOKEN` 可以提高限额并读取私有仓库。token 能读到的内容，这个 server 的所有 MCP 客户端都能读到，所以请使用只授权所需仓库、只有 *Issues* 和 *Pull requests* 只读权限的 [fine-grained token](https://github.com/settings/personal-access-tokens)。
 
 **传输方式**
 
@@ -274,7 +279,7 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-73 个测试离线运行，不到 1 秒完成，用假的 LLM、OpenAlex 和 reranker 客户端替代真实服务。覆盖范围：
+104 个测试离线运行，不到 1 秒完成，用假的 LLM、OpenAlex 和 reranker 客户端替代真实服务。覆盖范围：
 
 - 检索：语义搜索、关键词检索式融合、重复论文合并、过滤条件、重排、引用先验、引文扩展、各策略的默认配置、OpenAlex 额度用尽和请求超时
 - 评测指标
@@ -282,6 +287,7 @@ pytest
 - Agent 循环：`tool_call_id` 对应关系、并行调用、编造的 ID、强制最后一步作答、API 出错
 - Structured Outputs 的降级逻辑
 - MCP server（通过 SDK 的进程内客户端测试）
+- GitHub 工具：搜索条件、结果格式、参数校验、限流等 API 错误
 
 ## 项目结构
 
@@ -291,6 +297,7 @@ backend/
 ├── agent.py               # 基于 function calling 的研究 Agent
 ├── tools.py               # 检索工具：Pydantic schema + OpenAlex 实现
 ├── mcp_server.py          # 对外提供工具的 MCP server
+├── github_tools.py        # MCP server 的 GitHub issue / pull request 只读工具
 ├── wsgi.py                # gunicorn 的 WSGI 入口（Docker 使用）
 ├── llm.py                 # LLM 客户端配置、Structured Outputs 辅助函数
 ├── query_processor.py     # 流水线检索的查询分析
