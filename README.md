@@ -2,6 +2,8 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+[![CI/CD](https://github.com/LynnUoE/om-dissertation-implementation/actions/workflows/ci.yml/badge.svg)](https://github.com/LynnUoE/om-dissertation-implementation/actions/workflows/ci.yml)
+
 LitFinder is an LLM-powered academic literature search system. Describe what you are looking for in plain language, for example *"methods for detecting hallucinations in LLM outputs, especially retrieval-based ones"*, and it finds relevant papers and researchers in [OpenAlex](https://openalex.org), a catalog of 300M+ scholarly works.
 
 It started as my undergraduate dissertation at the University of Edinburgh (School of Informatics) and has since been extended with LLM tool use:
@@ -311,6 +313,7 @@ frontend/                  # Static HTML/CSS/JS UI
 eval/                      # Retrieval benchmark: queries, labels, runs, results
 docs/                      # Technical report and EC2 deployment guide (EN/ZH)
 deploy/                    # Production setup: Caddy, compose overrides, server scripts
+.github/workflows/ci.yml   # CI/CD: tests, image build, deployment to the server
 tests/                     # Offline unit tests
 config/nginx.conf          # Example Nginx config for deployment
 .mcp.json                  # Registers the MCP server for Claude Code
@@ -346,6 +349,8 @@ To use the image as an MCP server over stdio, e.g. in Claude Desktop, have the h
 ## Deployment
 
 **Public server on AWS EC2.** [docs/deploy-ec2.md](docs/deploy-ec2.md) walks through a ~US$17/month setup: one t4g.small instance running the Docker Compose stack behind Caddy, which gets HTTPS certificates automatically and requires a token for `/mcp`. For a public deployment the app enforces usage limits on every endpoint that spends API credit (per client per hour and per day site-wide, HTTP 429 with `Retry-After` when exceeded), so a public link can't run up your bill.
+
+**CI/CD.** A GitHub Actions workflow (`.github/workflows/ci.yml`) runs on every pull request and push to `main`. It runs the tests, builds the Docker image and checks that the app starts in it. After both pass on `main`, it deploys that commit to the server over SSH and checks the live site's health endpoint. The workflow's SSH key can only run `deploy/ci-deploy.sh`, which deploys nothing but commits of `main`. Deployment is off until you set it up ([guide, section 7](docs/deploy-ec2.md#7-automatic-deployment-cicd)).
 
 Without Docker, Nginx can serve `frontend/` and proxy `/api/` to Flask. `config/nginx.conf` is an example; set its `root` paths to your checkout. The frontend calls the same-origin path `/api`, so it works unchanged behind the proxy.
 

@@ -29,6 +29,7 @@ What the production setup adds (`deploy/`):
 | `deploy/docker-compose.prod.yml` | Adds Caddy, removes the app's published ports, turns on the limits, trusts Caddy's `X-Forwarded-For`, disables cross-origin API calls, rotates logs |
 | `deploy/setup-server.sh` | One-time server setup: swap, Docker from Docker's apt repository, firewall, automatic security updates |
 | `deploy/deploy.sh` | Checks the config files, then builds and starts everything; also runs any other `docker compose` command with the right files |
+| `deploy/ci-deploy.sh` | Run by the CI/CD workflow over SSH: updates the server to a commit of `main` and runs `deploy.sh` |
 
 ## Cost
 
@@ -167,7 +168,7 @@ claude mcp add --transport http litfinder-cloud https://YOUR_ADDRESS/mcp --heade
 
 | Task | How |
 |---|---|
-| Update to the latest code | `git pull && deploy/deploy.sh` |
+| Update to the latest code | `git pull && deploy/deploy.sh`, or automatically on every merge ([section 7](#7-automatic-deployment-cicd)) |
 | Logs | `deploy/deploy.sh logs -f --tail 100 web` (logs are rotated at 3 × 10 MB per container) |
 | Status | `deploy/deploy.sh ps` |
 | Restart after a reboot | Automatic: Docker starts at boot and the containers use `restart: unless-stopped` |
@@ -181,6 +182,43 @@ claude mcp add --transport http litfinder-cloud https://YOUR_ADDRESS/mcp --heade
 - `backend/.env` and `deploy/.env` are ignored by git; never commit them. Rotate the API keys if you think they leaked.
 - The firewall (ufw) allows only SSH, HTTP and HTTPS. Docker-published ports bypass ufw, which is why the production compose file publishes only Caddy's.
 - The app has no user accounts. The usage limits cap what anyone can spend, but anyone can use the demo up to them.
+
+## 7. Automatic deployment (CI/CD)
+
+`.github/workflows/ci.yml` runs on every pull request and every push to `main`:
+
+| Job | What it does |
+|---|---|
+| `test` | Runs the offline test suite |
+| `docker` | Builds the production image and checks that the app starts in it |
+| `deploy` | On `main` only, after the other two pass: connects to the server over SSH, which fast-forwards to the commit and runs `deploy/deploy.sh`; then checks `/api/health_check` on the live site |
+
+So merging a pull request updates the site, and a commit that fails the tests or doesn't build is never deployed. The `deploy` job is skipped until you turn it on:
+
+**1. Create a key that can only deploy.** On the server:
+
+```bash
+ssh-keygen -t ed25519 -N "" -C github-actions -f ~/.ssh/github_actions
+echo "command=\"$HOME/litfinder/deploy/ci-deploy.sh\",restrict $(cat ~/.ssh/github_actions.pub)" >> ~/.ssh/authorized_keys
+```
+
+The `command=` option makes sshd run `deploy/ci-deploy.sh` whatever the client asks for, and `restrict` turns off port forwarding and terminals. The script accepts one thing, a commit SHA, and deploys it only if it is on `origin/main`. So whoever holds this key can redeploy what is already on `main` and nothing else.
+
+**2. Let GitHub's runners reach SSH.** They have no fixed IP addresses, so in the instance's security group change the SSH rule's source from *My IP* to *Anywhere-IPv4*. SSH accepts keys only, so password guessing gets nowhere; `sudo ufw limit OpenSSH` on the server also slows repeated attempts down. If you would rather keep port 22 closed to the internet, leave the `deploy` job off and keep updating by hand.
+
+**3. Give the workflow the key.** On your computer, in the repository directory (needs the [GitHub CLI](https://cli.github.com)):
+
+```bash
+ssh -i ~/.ssh/litfinder.pem ubuntu@YOUR_ADDRESS 'cat ~/.ssh/github_actions' | gh secret set DEPLOY_SSH_KEY
+ssh-keyscan -t ed25519 YOUR_ADDRESS | gh secret set DEPLOY_KNOWN_HOSTS
+gh variable set DEPLOY_HOST --body YOUR_ADDRESS
+gh variable set DEPLOY_ENABLED --body true
+ssh -i ~/.ssh/litfinder.pem ubuntu@YOUR_ADDRESS 'rm ~/.ssh/github_actions'   # GitHub has the only copy now
+```
+
+`DEPLOY_KNOWN_HOSTS` pins the server's host key, so the workflow refuses to connect to anything else. Set the variable `DEPLOY_USER` if the server's user isn't `ubuntu`.
+
+To pause automatic deployment, run `gh variable set DEPLOY_ENABLED --body false`. To deploy again without a new commit, re-run the workflow's `deploy` job on GitHub (Actions → the run → Re-run jobs).
 
 ## Troubleshooting
 

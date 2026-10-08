@@ -2,6 +2,8 @@
 
 [English](README.md) | **简体中文**
 
+[![CI/CD](https://github.com/LynnUoE/om-dissertation-implementation/actions/workflows/ci.yml/badge.svg)](https://github.com/LynnUoE/om-dissertation-implementation/actions/workflows/ci.yml)
+
 LitFinder 是一个基于大语言模型的学术文献检索系统。用自然语言描述你要找的内容，比如 *"检测 LLM 输出幻觉的方法，特别是基于检索的方法"*，它会在 [OpenAlex](https://openalex.org)（收录 3 亿多篇学术作品的开放目录）中找到相关论文和研究者。
 
 这个项目最初是我在爱丁堡大学（School of Informatics）的本科毕业设计，之后加入了 LLM 工具调用相关的能力：
@@ -312,6 +314,7 @@ eval/                      # 检索评测集：查询、标签、运行结果、
 docs/                      # 技术报告和 EC2 部署指南（中英文）
 tests/                     # 离线单元测试
 deploy/                    # 生产环境配置：Caddy、compose 覆盖配置、服务器脚本
+.github/workflows/ci.yml   # CI/CD：测试、镜像构建、部署到服务器
 config/nginx.conf          # 部署用的 Nginx 配置示例
 .mcp.json                  # 为 Claude Code 注册 MCP server
 Dockerfile, docker-compose.yml
@@ -346,6 +349,8 @@ Web 应用由 gunicorn 运行（`backend/wsgi.py`）。镜像设置了 `HF_HUB_O
 ## 部署
 
 **在 AWS EC2 上公开部署。** [docs/deploy-ec2.zh-CN.md](docs/deploy-ec2.zh-CN.md) 介绍了一套每月约 17 美元的方案：一台 t4g.small 服务器运行 Docker Compose，前面由 Caddy 自动配置 HTTPS，并要求访问 `/mcp` 时携带 token。公开部署时，应用会对每个产生 API 费用的接口做用量限制（每个访客每小时、全站每天两级上限，超过时返回 HTTP 429 和 `Retry-After`），公开的链接不会刷爆你的账单。
+
+**CI/CD。** GitHub Actions workflow（`.github/workflows/ci.yml`）在每个 pull request 和每次推送到 `main` 时运行：跑测试，构建 Docker 镜像并检查应用能在镜像里启动。两项在 `main` 上都通过后，它通过 SSH 把这个提交部署到服务器，再检查线上站点的健康检查接口。workflow 使用的 SSH 密钥只能执行 `deploy/ci-deploy.sh`，而这个脚本只部署 `main` 上的提交。自动部署默认关闭，需要先完成配置（[部署指南第 7 节](docs/deploy-ec2.zh-CN.md#7-自动部署cicd)）。
 
 不用 Docker 的话，可以用 Nginx 提供 `frontend/` 静态文件，并把 `/api/` 反向代理到 Flask。`config/nginx.conf` 是一份示例配置，需要把其中的 `root` 路径改成你的项目路径。前端通过同源路径 `/api` 调用接口，所以放在反向代理后面无需修改。
 
