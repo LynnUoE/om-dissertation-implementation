@@ -1,0 +1,104 @@
+# CI on every pull request and push to main; CD to the EC2 server after CI passes on main.
+#
+#   test    offline unit tests (fake LLM / OpenAlex / GitHub clients, so no secrets)
+#   docker  build the production image and check that the app starts in it
+#   deploy  main only: the server pulls this commit and rebuilds (docs/deploy-ec2.md, "Automatic deployment")
+name: CI/CD
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  # A newer push to a pull request replaces the run in progress; runs on main all finish
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"  # Same as the Dockerfile
+          cache: pip
+          cache-dependency-path: requirements.txt
+      - name: Install dependencies
+        # The tests replace the reranker with a fake and the app imports sentence-transformers
+        # lazily, so skip it (and the 2 GB of PyTorch it pulls in). The docker job covers the full install.
+        run: |
+          grep -v '^sentence-transformers' requirements.txt > "$RUNNER_TEMP/requirements-ci.txt"
+          pip install -r "$RUNNER_TEMP/requirements-ci.txt" "pytest>=8.0"
+      - name: Run the tests
+        run: pytest -q
+      - name: Check the deploy scripts' syntax
+        run: for script in deploy/*.sh; do bash -n "$script"; done
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          tags: litfinder:ci
+          load: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Start the app and wait for its health check
+        run: |
+          docker run -d --name litfinder -p 127.0.0.1:5001:5001 \
+            -e OPENAI_API_KEY=ci-placeholder -e HOST=0.0.0.0 -e DEBUG=false litfinder:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:5001/api/health_check; then exit 0; fi
+            sleep 2
+          done
+          docker logs litfinder
+          exit 1
+
+  deploy:
+    needs: [test, docker]
+    # Off until the repository variable DEPLOY_ENABLED is "true", so CI works before the server is set up
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment:
+      name: production
+      url: https://${{ vars.DEPLOY_HOST }}
+    concurrency:
+      group: deploy-production  # One deployment at a time, in order
+      cancel-in-progress: false
+    env:
+      DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+    steps:
+      - name: Deploy this commit on the server
+        env:
+          DEPLOY_USER: ${{ vars.DEPLOY_USER || 'ubuntu' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+        # The key is restricted on the server to running deploy/ci-deploy.sh, which takes the
+        # commit as its only input and deploys it only if it is on origin/main
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          ssh -i ~/.ssh/deploy_key -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=20 -o ServerAliveInterval=30 \
+            "$DEPLOY_USER@$DEPLOY_HOST" "$GITHUB_SHA"
+      - name: Check the live site
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS "https://$DEPLOY_HOST/api/health_check"; then exit 0; fi
+            sleep 5
+          done
+          exit 1

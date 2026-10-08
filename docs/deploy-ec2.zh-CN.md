@@ -29,6 +29,7 @@
 | `deploy/docker-compose.prod.yml` | 加入 Caddy；取消应用对外暴露的端口；开启用量限制；信任 Caddy 传来的 `X-Forwarded-For`；禁止跨域调用 API；日志轮转 |
 | `deploy/setup-server.sh` | 服务器一次性初始化：swap、从 Docker 官方 apt 源安装 Docker、防火墙、自动安全更新 |
 | `deploy/deploy.sh` | 先检查配置文件，再构建并启动所有服务；也可以带上正确的配置文件执行任意 `docker compose` 命令 |
+| `deploy/ci-deploy.sh` | 由 CI/CD workflow 通过 SSH 调用：把服务器更新到 `main` 上的某个提交，再执行 `deploy.sh` |
 
 ## 费用
 
@@ -167,7 +168,7 @@ claude mcp add --transport http litfinder-cloud https://你的地址/mcp --heade
 
 | 事情 | 做法 |
 |---|---|
-| 更新到最新代码 | `git pull && deploy/deploy.sh` |
+| 更新到最新代码 | `git pull && deploy/deploy.sh`，或者每次合并后自动部署（[第 7 节](#7-自动部署cicd)） |
 | 看日志 | `deploy/deploy.sh logs -f --tail 100 web`（每个容器的日志最多保留 3 × 10 MB） |
 | 查看状态 | `deploy/deploy.sh ps` |
 | 重启后自动恢复 | 自动：Docker 开机自启，容器设置了 `restart: unless-stopped` |
@@ -181,6 +182,43 @@ claude mcp add --transport http litfinder-cloud https://你的地址/mcp --heade
 - `backend/.env` 和 `deploy/.env` 已被 git 忽略，永远不要提交。怀疑泄露时立即更换 API key。
 - 防火墙（ufw）只放行 SSH、HTTP、HTTPS。Docker 对外发布的端口会绕过 ufw，所以生产配置只发布 Caddy 的端口。
 - 应用没有用户账号体系。用量上限封顶了任何人能花掉的钱，但在上限之内，任何人都可以使用这个演示。
+
+## 7. 自动部署（CI/CD）
+
+`.github/workflows/ci.yml` 在每个 pull request 和每次推送到 `main` 时运行：
+
+| Job | 作用 |
+|---|---|
+| `test` | 运行离线测试 |
+| `docker` | 构建生产镜像，并检查应用能在镜像里启动 |
+| `deploy` | 只在 `main` 上、前两个 job 通过后运行：通过 SSH 连接服务器，服务器快进到这个提交并执行 `deploy/deploy.sh`；然后检查线上站点的 `/api/health_check` |
+
+也就是说，合并一个 pull request 就会更新线上站点，而测试不通过或镜像构建失败的提交不会被部署。`deploy` 默认跳过，按下面的步骤开启：
+
+**1. 创建一把只能用来部署的密钥。** 在服务器上执行：
+
+```bash
+ssh-keygen -t ed25519 -N "" -C github-actions -f ~/.ssh/github_actions
+echo "command=\"$HOME/litfinder/deploy/ci-deploy.sh\",restrict $(cat ~/.ssh/github_actions.pub)" >> ~/.ssh/authorized_keys
+```
+
+有了 `command=` 选项，无论客户端要求执行什么，sshd 都只会运行 `deploy/ci-deploy.sh`；`restrict` 则禁用端口转发和终端。这个脚本只接受一个输入，即提交的 SHA，并且只在该提交位于 `origin/main` 上时才部署。所以拿到这把密钥的人只能重新部署 `main` 上已有的内容，做不了别的事。
+
+**2. 允许 GitHub 的 runner 访问 SSH。** runner 没有固定 IP，所以要在实例的安全组里把 SSH 规则的来源从 *My IP* 改成 *Anywhere-IPv4*。SSH 只接受密钥登录，猜密码没有用；在服务器上执行 `sudo ufw limit OpenSSH` 还可以限制反复尝试的频率。如果你不想把 22 端口对公网开放，就不要开启 `deploy`，继续手动更新。
+
+**3. 把密钥交给 workflow。** 在你自己的电脑上、仓库目录里执行（需要 [GitHub CLI](https://cli.github.com)）：
+
+```bash
+ssh -i ~/.ssh/litfinder.pem ubuntu@YOUR_ADDRESS 'cat ~/.ssh/github_actions' | gh secret set DEPLOY_SSH_KEY
+ssh-keyscan -t ed25519 YOUR_ADDRESS | gh secret set DEPLOY_KNOWN_HOSTS
+gh variable set DEPLOY_HOST --body YOUR_ADDRESS
+gh variable set DEPLOY_ENABLED --body true
+ssh -i ~/.ssh/litfinder.pem ubuntu@YOUR_ADDRESS 'rm ~/.ssh/github_actions'   # 现在只有 GitHub 保存着这把私钥
+```
+
+`DEPLOY_KNOWN_HOSTS` 固定了服务器的主机密钥，workflow 不会连接到其他机器。如果服务器的用户名不是 `ubuntu`，再设置变量 `DEPLOY_USER`。
+
+暂停自动部署：`gh variable set DEPLOY_ENABLED --body false`。不提交新代码而重新部署：在 GitHub 上重新运行 workflow 的 `deploy` job（Actions → 对应的运行 → Re-run jobs）。
 
 ## 常见问题
 
