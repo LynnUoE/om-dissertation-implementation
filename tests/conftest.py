@@ -53,6 +53,34 @@ class FakeOpenAlex:
         return OpenAlexResponse(200, {"results": [author]})
 
 
+def make_issue(n: int, pull: bool = False, **fields) -> Dict:
+    """A minimal raw GitHub issue; the issues API marks pull requests with a pull_request key."""
+    issue = {
+        "number": n, "title": f"Issue {n}", "state": "open", "user": {"login": "octocat"},
+        "labels": [{"name": "bug"}], "comments": 0, "body": "Something is broken.",
+        "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z", "closed_at": None,
+        "html_url": f"https://github.com/acme/widgets/{'pull' if pull else 'issues'}/{n}",
+    }
+    if pull:
+        issue["pull_request"] = {"merged_at": None}
+    return {**issue, **fields}
+
+
+class FakeGitHub:
+    """Stands in for GitHubClient; records requests and serves canned responses by path."""
+
+    def __init__(self, responses: Optional[Dict] = None):
+        self.responses = responses or {}
+        self.calls: List[Dict] = []
+
+    def get(self, path: str, params: Optional[Dict] = None):
+        from tools import ToolError
+        self.calls.append({"path": path, "params": params})
+        if path not in self.responses:
+            raise ToolError("Not found on GitHub")
+        return self.responses[path]
+
+
 # -- fake chat completions ---------------------------------------------------
 
 def tool_call(call_id: str, name: str, arguments) -> SimpleNamespace:

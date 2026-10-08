@@ -3,10 +3,11 @@ import json
 import pytest
 from mcp import Client
 
+from github_tools import GetGithubIssue, GitHubTools, SearchGithubIssues
 from mcp_server import create_server
 from tools import GetAuthorPapers, GetPaper, SearchAuthors, SearchPapers
 
-from conftest import FakeOpenAlex
+from conftest import FakeGitHub, FakeOpenAlex, make_issue
 
 pytestmark = pytest.mark.anyio
 
@@ -22,15 +23,24 @@ def openalex():
 
 
 @pytest.fixture
-async def client(openalex):
-    async with Client(create_server(openalex)) as c:
+def github():
+    return FakeGitHub({
+        "/search/issues": {"total_count": 1, "items": [make_issue(7)]},
+        "/repos/acme/widgets/issues/7": make_issue(7),
+    })
+
+
+@pytest.fixture
+async def client(openalex, github):
+    async with Client(create_server(openalex, GitHubTools(github, default_repo="acme/widgets"))) as c:
         yield c
 
 
 async def test_tools_mirror_the_function_calling_schemas(client):
     tools = {t.name: t for t in (await client.list_tools()).tools}
     expected = {"search_papers": SearchPapers, "get_paper": GetPaper,
-                "search_authors": SearchAuthors, "get_author_papers": GetAuthorPapers}
+                "search_authors": SearchAuthors, "get_author_papers": GetAuthorPapers,
+                "search_github_issues": SearchGithubIssues, "get_github_issue": GetGithubIssue}
     assert set(tools) == set(expected)
     for name, model in expected.items():
         tool = tools[name]
@@ -79,6 +89,29 @@ async def test_author_tools(client, openalex):
     await client.call_tool("get_author_papers", {"author_id": "A1"})
     assert openalex.calls[-1]["filter_string"] == "author.id:A1"
     assert openalex.calls[-1]["sort"] == "cited_by_count:desc"
+
+
+async def test_github_tools_use_defaults(client, github):
+    tools = {t.name: t for t in (await client.list_tools()).tools}
+    assert "required" not in tools["search_github_issues"].input_schema
+    assert tools["get_github_issue"].input_schema["required"] == ["number"]
+
+    found = json.loads((await client.call_tool("search_github_issues", {})).content[0].text)
+    assert found["repo"] == "acme/widgets" and [r["number"] for r in found["results"]] == [7]
+    assert github.calls[0]["params"]["q"] == "repo:acme/widgets is:issue is:open"
+
+    issue = json.loads((await client.call_tool("get_github_issue", {"number": 7})).content[0].text)
+    assert issue["title"] == "Issue 7" and issue["body"] == "Something is broken."
+
+
+async def test_github_errors_come_back_as_is_error_results(client, github):
+    result = await client.call_tool("get_github_issue", {"number": 404})
+    assert result.is_error is True and "Not found on GitHub" in result.content[0].text
+
+    calls = len(github.calls)
+    result = await client.call_tool("search_github_issues", {"repo": "acme/widgets is:private"})
+    assert result.is_error is True and "Invalid repo" in result.content[0].text
+    assert len(github.calls) == calls
 
 
 async def test_literature_review_prompt(client):
